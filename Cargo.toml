@@ -4,3 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.95"
+candle-core = { version = "0.8.2", features = ["accelerate", "metal"] }
+candle-nn = { version = "0.8.2", features = ["accelerate", "metal"] }
+candle-transformers = { version = "0.8.2", features = ["accelerate", "metal"] }
+colorous = "1.0.15"
+hf-hub = "0.4.1"
+regex = "1.11.1"
+serde = "1.0.217"
+serde_json = "1.0.138"
+strip-ansi-escapes = "0.2.1"
+termcolor = "1.4.1"
+tokenizers = "0.21.0"
+ureq = { version = "3.0.5", features = ["json"] }
