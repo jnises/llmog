@@ -10,6 +10,7 @@ candle-nn = { version = "0.8.2", features = ["accelerate", "metal"] }
 candle-transformers = { version = "0.8.2", features = ["accelerate", "metal"] }
 colorous = "1.0.15"
 hf-hub = "0.4.1"
+itertools = "0.14.0"
 regex = "1.11.1"
 serde = "1.0.217"
 serde_json = "1.0.138"

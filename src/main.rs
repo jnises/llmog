@@ -241,7 +241,10 @@
 // }
 
 use ansi_stripper::AnsiStripReader;
+use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
@@ -298,6 +301,13 @@ const LOG_SCORE_FORMAT: &str = "
   }
 ";
 
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Given several log lines, only analyze the LAST line for interesting information. Use any preceding lines strictly as context. First, provide a brief reasoning for the last line; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
+- 0-20: routine/unimportant logs
+- 21-40: minor information
+- 41-60: noteworthy information
+- 61-80: important warnings/errors
+- 81-100: critical errors/security issues";
+
 fn main() -> anyhow::Result<()> {
     const URL: &str = "http://localhost:11434";
     let agent = Agent::new_with_defaults();
@@ -312,37 +322,50 @@ fn main() -> anyhow::Result<()> {
     dbg!(pull_response.body_mut().read_to_string());
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
-//     const SYSTEM_PROMPT: &str = "You are a developer log analyzer. For each log line, provide a brief reason why the log line is interesting or not interesting from a developer's perspective. Then on a new line, rate the interestingness from 0 to 100, where:
-// - 0-20: routine/unimportant logs
-// - 21-40: minor information
-// - 41-60: noteworthy information
-// - 61-80: important warnings/errors
-// - 81-100: critical errors/security issues
-// Output format must be exactly:
-// <reason>
-// Score: <score>";
-    const SYSTEM_PROMPT: &str = "You are a developer log analyzer. For each log line, rate whether the log line is interesting or not from a developer's perspective. Rate the interestingness from 0 to 100, where:
-    - 0-20: routine/unimportant logs
-    - 21-40: minor information
-    - 41-60: noteworthy information
-    - 61-80: important warnings/errors
-    - 81-100: critical errors/security issues
-    Output format must be exactly:
-    Score: <score>";
+    //     const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Given a sequence of log lines rate how interesting the LAST line is from a developer's perspective. Start with a brief reasoning. Then on a new line, rate the interestingness from 0 to 100, where:
+    //     - 0-20: routine/unimportant logs
+    //     - 21-40: minor information
+    //     - 41-60: noteworthy information
+    //     - 61-80: important warnings/errors
+    //     - 81-100: critical errors/security issues
+    //     Output format must be exactly:
+    //     <reason>
+    //     Score: <score>";
+    // const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Given a sequence of log lines rate how interesting the last line is from a developer's perspective. Rate the interestingness from 0 to 100, where:
+    // - 0-20: routine/unimportant logs
+    // - 21-40: minor information
+    // - 41-60: noteworthy information
+    // - 61-80: important warnings/errors
+    // - 81-100: critical errors/security issues
+    // Output format must be exactly:
+    // Score: <score>";
 
     // the model sometimes likes to prepend Score: even though we tell it not to
-    let score_re = regex::Regex::new(r"\s*(?i)(?:Score:\s*)?(\d+(?:\.\d+)?)")?;
+    //let score_re = regex::Regex::new(r"\s*(?i)(?:Score:\s*)?(\d+(?:\.\d+)?)")?;
+
+    let response_re =
+        regex::Regex::new(r"(?i)(?<reason>.*)\n\s*(?:Score:\s*)?(?<score>\d+(?:\.\d+)?)")?;
 
     let stdout = termcolor::StandardStream::stdout(ColorChoice::Auto);
     let mut so = stdout.lock();
-    for line in reader.lines() {
-        let Ok(line) = line else {
-            break;
-        };
+    const LINE_WINDOW: usize = 3;
+    for lines in windowed(reader.lines().map(|l| l.unwrap()), LINE_WINDOW) {
+        //let line = line?;
+        let line = lines.back().unwrap();
         if line.trim().is_empty() {
             writeln!(so, "")?;
             continue;
         }
+        let mut concatlines = String::new();
+        for (i, l) in lines.iter().enumerate() {
+            writeln!(&mut concatlines, "{}: {l}", if i < lines.len() - 1 { "context" } else { "focus" })?;
+        }
+        //let concatlines = Vec::from(lines.clone()).join("\n");
+        //dbg!(&concatlines);
+        write!(
+            so,
+            "concatlines: {concatlines}\nendofconcatlines"
+        )?;
         for retry in 0.. {
             let response: ChatResponse = agent
                 .post(format!("{URL}/api/chat"))
@@ -356,7 +379,7 @@ fn main() -> anyhow::Result<()> {
                         },
                         Message {
                             role: "user".to_string(),
-                            content: line.clone(),
+                            content: concatlines.clone(),
                         },
                     ],
                     format: None, //Some(LOG_SCORE_FORMAT.to_string()),
@@ -367,17 +390,31 @@ fn main() -> anyhow::Result<()> {
                 anyhow::bail!("bad reponse role");
             }
 
-            if let Some(score) = response.message.content.lines().last().and_then(|s| {
-                //s.parse::<f64>().ok()
-                score_re
-                    .captures(s)
-                    .and_then(|caps| caps.get(1))
-                    .and_then(|m| m.as_str().parse::<f64>().ok())
-            }) {
+            if let Some((reason, score)) =
+                response_re
+                    .captures(&response.message.content)
+                    .and_then(|caps| {
+                        Some((
+                            caps["reason"].to_string(),
+                            caps["score"].parse::<f64>().ok()?,
+                        ))
+                    })
+            {
+                dbg!(&reason);
+                dbg!(score);
+                // if let Some(score) = response.message.content.lines().last().and_then(|s| {
+                //     //s.parse::<f64>().ok()
+                //     score_re
+                //         .captures(s)
+                //         .and_then(|caps| caps.get(1))
+                //         .and_then(|m| m.as_str().parse::<f64>().ok())
+                // }) {
                 let color = colorous::TURBO.eval_continuous(score.clamp(0.0, 100.0) / 100.0);
                 let mut color_spec = ColorSpec::new();
                 color_spec.set_fg(Some(colorous_to_term(color)));
                 so.set_color(&color_spec)?;
+                writeln!(so, "{reason}")?;
+                writeln!(so, "{line}")?;
             } else {
                 if retry > 10 {
                     writeln!(
@@ -391,8 +428,6 @@ fn main() -> anyhow::Result<()> {
                     continue;
                 }
             }
-            //writeln!(so, "{}", response.message.content)?;
-            writeln!(so, "{line}")?;
             break;
         }
     }
@@ -403,4 +438,25 @@ fn main() -> anyhow::Result<()> {
 fn colorous_to_term(c: colorous::Color) -> termcolor::Color {
     let (r, g, b) = c.as_tuple();
     termcolor::Color::Rgb(r, g, b)
+}
+
+/// Iterates over all windows of size n or less over an iterator. Only do <n for the initial items, not the last ones.
+// TODO: don't clone so much
+fn windowed<I: Iterator>(mut iter: I, n: usize) -> impl Iterator<Item = VecDeque<I::Item>>
+where
+    //I: Clone,
+    I::Item: Clone,
+{
+    let mut current: VecDeque<I::Item> = VecDeque::new();
+    std::iter::from_fn(move || {
+        if let Some(item) = iter.next() {
+            if current.len() >= n {
+                current.pop_front();
+            }
+            current.push_back(item);
+            Some(current.clone())
+        } else {
+            None
+        }
+    })
 }
