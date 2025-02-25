@@ -248,7 +248,7 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
-use ureq::{http::StatusCode, Agent};
+use ureq::{Agent, http::StatusCode};
 
 mod ansi_stripper;
 
@@ -301,7 +301,7 @@ const LOG_SCORE_FORMAT: &str = "
   }
 ";
 
-const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Given several log lines, only analyze the LAST line for interesting information. Use any preceding lines strictly as context. First, provide a brief reasoning for the last line; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Analyze each given line for interesting information. Use any preceding lines strictly as context. First, provide a brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
 - 0-20: routine/unimportant logs
 - 21-40: minor information
 - 41-60: noteworthy information
@@ -349,43 +349,58 @@ fn main() -> anyhow::Result<()> {
     let stdout = termcolor::StandardStream::stdout(ColorChoice::Auto);
     let mut so = stdout.lock();
     const LINE_WINDOW: usize = 3;
-    for lines in windowed(reader.lines().map(|l| l.unwrap()), LINE_WINDOW) {
-        //let line = line?;
-        let line = lines.back().unwrap();
+    let mut history: VecDeque<(String, String)> = VecDeque::new();
+    //for lines in windowed(reader.lines().map(|l| l.unwrap()), LINE_WINDOW) {
+    for line in reader.lines() {
+        let line = line?;
+        //let line = lines.back().unwrap();
         if line.trim().is_empty() {
             writeln!(so, "")?;
             continue;
         }
-        let mut concatlines = String::new();
-        for (i, l) in lines.iter().enumerate() {
-            writeln!(&mut concatlines, "{}: {l}", if i < lines.len() - 1 { "context" } else { "focus" })?;
-        }
+        // let mut concatlines = String::new();
+        // for (i, l) in lines.iter().enumerate() {
+        //     writeln!(&mut concatlines, "{}: {l}", if i < lines.len() - 1 { "context" } else { "focus" })?;
+        // }
         //let concatlines = Vec::from(lines.clone()).join("\n");
         //dbg!(&concatlines);
-        write!(
-            so,
-            "concatlines: {concatlines}\nendofconcatlines"
-        )?;
+        // write!(
+        //     so,
+        //     "concatlines: {concatlines}\nendofconcatlines"
+        // )?;
+
         for retry in 0.. {
+            let mut messages = Vec::with_capacity(history.len() + 2);
+            messages.push(Message {
+                role: "system".to_string(),
+                content: SYSTEM_PROMPT.to_string(),
+            });
+            for (request, response) in &history {
+                messages.push(Message {
+                    role: "user".to_string(),
+                    content: request.clone(),
+                });
+                messages.push(Message {
+                    role: "assistant".to_string(),
+                    content: response.clone(),
+                });
+            }
+            messages.push(Message {
+                role: "user".to_string(),
+                content: line.clone(),
+            });
+            //dbg!(messages.iter().map(|Message{role, content}| (role, content)).collect::<Vec<_>>());
             let response: ChatResponse = agent
                 .post(format!("{URL}/api/chat"))
                 .send_json(ChatParams {
                     model: "llama3.2".to_string(),
                     stream: false,
-                    messages: vec![
-                        Message {
-                            role: "system".to_string(),
-                            content: SYSTEM_PROMPT.to_string(),
-                        },
-                        Message {
-                            role: "user".to_string(),
-                            content: concatlines.clone(),
-                        },
-                    ],
+                    messages,
                     format: None, //Some(LOG_SCORE_FORMAT.to_string()),
                 })?
                 .body_mut()
                 .read_json()?;
+            //dbg!(&response.message.content);
             if &response.message.role != "assistant" {
                 anyhow::bail!("bad reponse role");
             }
@@ -400,8 +415,8 @@ fn main() -> anyhow::Result<()> {
                         ))
                     })
             {
-                dbg!(&reason);
-                dbg!(score);
+                //dbg!(&reason);
+                //dbg!(score);
                 // if let Some(score) = response.message.content.lines().last().and_then(|s| {
                 //     //s.parse::<f64>().ok()
                 //     score_re
@@ -413,8 +428,12 @@ fn main() -> anyhow::Result<()> {
                 let mut color_spec = ColorSpec::new();
                 color_spec.set_fg(Some(colorous_to_term(color)));
                 so.set_color(&color_spec)?;
-                writeln!(so, "{reason}")?;
+                //writeln!(so, "{reason}")?;
                 writeln!(so, "{line}")?;
+                if history.len() > LINE_WINDOW {
+                    history.pop_front();
+                }
+                history.push_back((line, response.message.content));
             } else {
                 if retry > 10 {
                     writeln!(
