@@ -86,10 +86,10 @@ fn main() -> anyhow::Result<()> {
     let response_re =
         regex::Regex::new(r"(?i)(?<reason>.*)\n\s*(?:Score:\s*)?(?<score>\d+(?:\.\d+)?)")?;
 
-    let stdout = termcolor::StandardStream::stdout(ColorChoice::Auto);
-    let mut so = stdout.lock();
+    let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
     let mut history: VecDeque<(String, String)> = VecDeque::new();
     for line in reader.lines() {
+        so.flush()?;
         let line = line?;
         if line.trim().is_empty() {
             writeln!(so, "")?;
