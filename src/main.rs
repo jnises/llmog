@@ -1,13 +1,11 @@
 use ansi_stripper::AnsiStripReader;
 use clap::Parser;
-use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::fmt::Write as _;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
-use ureq::{Agent, http::StatusCode};
+use ureq::Agent;
 
 mod ansi_stripper;
 
@@ -57,7 +55,8 @@ struct LogScore {
 // - 61-80: important warnings/errors
 // - 81-100: critical errors/security issues";
 
-const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate each log line by uniqueness, impact, and actionability.
+const SYSTEM_PROMPT: &str =
+    "You are a developer log analyzer. Rate each log line by uniqueness, impact, and actionability.
 For each log, output EXACTLY in this format:
 ```
 [Very brief single-sentence analysis]
@@ -68,11 +67,9 @@ Low (0-30): Routine/minor info
 Medium (31-70): Noteworthy/important
 High (71-100): Critical/security issues";
 
-
-
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    
+
     const URL: &str = "http://localhost:11434";
     let agent = Agent::new_with_defaults();
     const MODEL: &str = "llama3.2";
