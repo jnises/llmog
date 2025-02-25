@@ -301,7 +301,7 @@ const LOG_SCORE_FORMAT: &str = "
   }
 ";
 
-const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Analyze each given line for interesting information. Use any preceding lines strictly as context. First, provide a brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Use any preceding lines strictly as context. First, provide a brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
 - 0-20: routine/unimportant logs
 - 21-40: minor information
 - 41-60: noteworthy information
