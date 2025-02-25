@@ -1,4 +1,5 @@
 use ansi_stripper::AnsiStripReader;
+use clap::Parser;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -9,6 +10,14 @@ use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
 use ureq::{Agent, http::StatusCode};
 
 mod ansi_stripper;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Show analysis reason after each line
+    #[arg(long)]
+    show_reason: bool,
+}
 
 #[derive(Serialize, Deserialize)]
 struct PullParams {
@@ -59,7 +68,11 @@ Low (0-30): Routine/minor info
 Medium (31-70): Noteworthy/important
 High (71-100): Critical/security issues";
 
+
+
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    
     const URL: &str = "http://localhost:11434";
     let agent = Agent::new_with_defaults();
     const MODEL: &str = "llama3.2";
@@ -170,8 +183,7 @@ fn main() -> anyhow::Result<()> {
                 so.set_color(&color_spec)?;
                 //writeln!(so, "{reason}")?;
                 write!(so, "{line}")?;
-                const SHOW_REASON: bool = true;
-                if SHOW_REASON {
+                if cli.show_reason {
                     so.reset()?;
                     write!(so, " : {reason}")?;
                 }
