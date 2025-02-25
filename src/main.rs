@@ -51,11 +51,12 @@ const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interest
 fn main() -> anyhow::Result<()> {
     const URL: &str = "http://localhost:11434";
     let agent = Agent::new_with_defaults();
+    const MODEL: &str = "llama3.2";
     let mut pull_response = agent
         .post(format!("{URL}/api/pull"))
         .send_json(PullParams {
             //model: "llama3.2:1b-instruct-q2_K".to_string(),
-            model: "llama3.2".to_string(),
+            model: MODEL.to_string(),
             stream: false,
         })?;
     dbg!(&pull_response);
@@ -121,7 +122,7 @@ fn main() -> anyhow::Result<()> {
             let response: ChatResponse = agent
                 .post(format!("{URL}/api/chat"))
                 .send_json(ChatParams {
-                    model: "llama3.2".to_string(),
+                    model: MODEL.to_string(),
                     stream: false,
                     messages,
                     format: None, //Some(LOG_SCORE_FORMAT.to_string()),
