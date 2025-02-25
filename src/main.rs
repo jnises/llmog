@@ -1,5 +1,6 @@
 use ansi_stripper::AnsiStripReader;
 use clap::Parser;
+use colorous::Gradient;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -65,6 +66,8 @@ const MODEL: &str = "llama3.2";
 
 const LINE_WINDOW: usize = 3;
 
+const GRADIENT: Gradient = colorous::VIRIDIS;
+
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
@@ -113,18 +116,16 @@ fn main() -> anyhow::Result<()> {
                 role: "user".to_string(),
                 content: line.clone(),
             });
-            //dbg!(messages.iter().map(|Message{role, content}| (role, content)).collect::<Vec<_>>());
             let response: ChatResponse = agent
                 .post(format!("{URL}/api/chat"))
                 .send_json(ChatParams {
                     model: MODEL.to_string(),
                     stream: false,
                     messages,
-                    format: None, //Some(LOG_SCORE_FORMAT.to_string()),
+                    format: None,
                 })?
                 .body_mut()
                 .read_json()?;
-            //dbg!(&response.message.content);
             if &response.message.role != "assistant" {
                 anyhow::bail!("bad reponse role");
             }
@@ -139,20 +140,10 @@ fn main() -> anyhow::Result<()> {
                         ))
                     })
             {
-                //dbg!(&reason);
-                //dbg!(score);
-                // if let Some(score) = response.message.content.lines().last().and_then(|s| {
-                //     //s.parse::<f64>().ok()
-                //     score_re
-                //         .captures(s)
-                //         .and_then(|caps| caps.get(1))
-                //         .and_then(|m| m.as_str().parse::<f64>().ok())
-                // }) {
-                let color = colorous::VIRIDIS.eval_continuous(score.clamp(0.0, 100.0) / 100.0);
+                let color = GRADIENT.eval_continuous(score.clamp(0.0, 100.0) / 100.0);
                 let mut color_spec = ColorSpec::new();
                 color_spec.set_fg(Some(colorous_to_term(color)));
                 so.set_color(&color_spec)?;
-                //writeln!(so, "{reason}")?;
                 write!(so, "{line}")?;
                 if cli.analysis {
                     so.reset()?;
