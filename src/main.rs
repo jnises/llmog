@@ -87,7 +87,11 @@ fn main() -> anyhow::Result<()> {
         regex::Regex::new(r"(?i)(?<reason>.*)\n\s*(?:Score:\s*)?(?<score>\d+(?:\.\d+)?)")?;
 
     let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
-    let mut history: VecDeque<(String, String)> = VecDeque::new();
+    struct Exchange {
+        request: String,
+        response: String,
+    }
+    let mut history: VecDeque<Exchange> = VecDeque::new();
     for line in reader.lines() {
         so.flush()?;
         let line = line?;
@@ -102,7 +106,7 @@ fn main() -> anyhow::Result<()> {
                 role: "system".to_string(),
                 content: SYSTEM_PROMPT.to_string(),
             });
-            for (request, response) in &history {
+            for Exchange { request, response } in &history {
                 messages.push(Message {
                     role: "user".to_string(),
                     content: request.clone(),
@@ -153,7 +157,10 @@ fn main() -> anyhow::Result<()> {
                 if history.len() > LINE_WINDOW {
                     history.pop_front();
                 }
-                history.push_back((line, response.message.content));
+                history.push_back(Exchange {
+                    request: line,
+                    response: response.message.content,
+                });
             } else {
                 if retry > 10 {
                     error!("Bad response from model: {}", response.message.content);
