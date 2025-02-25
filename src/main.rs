@@ -41,7 +41,7 @@ struct LogScore {
     score: f64,
 }
 
-const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Use any preceding lines strictly as context. First, provide a brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Rate redundant lines lower. First, provide a very brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
 - 0-20: routine/unimportant logs
 - 21-40: minor information
 - 41-60: noteworthy information
@@ -52,10 +52,10 @@ fn main() -> anyhow::Result<()> {
     const URL: &str = "http://localhost:11434";
     let agent = Agent::new_with_defaults();
     const MODEL: &str = "llama3.2";
+    //const MODEL: &str = "llama3.2:1b";
     let mut pull_response = agent
         .post(format!("{URL}/api/pull"))
         .send_json(PullParams {
-            //model: "llama3.2:1b-instruct-q2_K".to_string(),
             model: MODEL.to_string(),
             stream: false,
         })?;
