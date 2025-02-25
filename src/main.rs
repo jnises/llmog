@@ -173,7 +173,6 @@ fn main() -> anyhow::Result<()> {
             break;
         }
     }
-    so.flush()?;
     Ok(())
 }
 
