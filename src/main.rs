@@ -41,12 +41,23 @@ struct LogScore {
     score: f64,
 }
 
-const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Rate redundant information lower. First, provide a very brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
-- 0-20: routine/unimportant logs
-- 21-40: minor information
-- 41-60: noteworthy information
-- 61-80: important warnings/errors
-- 81-100: critical errors/security issues";
+// const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Rate redundant information lower. First, provide a very brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
+// - 0-20: routine/unimportant logs
+// - 21-40: minor information
+// - 41-60: noteworthy information
+// - 61-80: important warnings/errors
+// - 81-100: critical errors/security issues";
+
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate each log line by uniqueness, impact, and actionability.
+For each log, output EXACTLY in this format:
+```
+[Very brief single-sentence analysis]
+SCORE: [0-100]
+```
+Score guide:
+Low (0-30): Routine/minor info
+Medium (31-70): Noteworthy/important
+High (71-100): Critical/security issues";
 
 fn main() -> anyhow::Result<()> {
     const URL: &str = "http://localhost:11434";
