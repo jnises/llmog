@@ -41,7 +41,7 @@ struct LogScore {
     score: f64,
 }
 
-const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Rate redundant lines lower. First, provide a very brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Rate redundant information lower. First, provide a very brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
 - 0-20: routine/unimportant logs
 - 21-40: minor information
 - 41-60: noteworthy information
@@ -60,7 +60,7 @@ fn main() -> anyhow::Result<()> {
             stream: false,
         })?;
     dbg!(&pull_response);
-    dbg!(pull_response.body_mut().read_to_string());
+    dbg!(pull_response.body_mut().read_to_string()?);
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
     //     const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Given a sequence of log lines rate how interesting the LAST line is from a developer's perspective. Start with a brief reasoning. Then on a new line, rate the interestingness from 0 to 100, where:
@@ -158,7 +158,13 @@ fn main() -> anyhow::Result<()> {
                 color_spec.set_fg(Some(colorous_to_term(color)));
                 so.set_color(&color_spec)?;
                 //writeln!(so, "{reason}")?;
-                writeln!(so, "{line}")?;
+                write!(so, "{line}")?;
+                const SHOW_REASON: bool = true;
+                if SHOW_REASON {
+                    so.reset()?;
+                    write!(so, " : {reason}")?;
+                }
+                writeln!(so, "")?;
                 if history.len() > LINE_WINDOW {
                     history.pop_front();
                 }
