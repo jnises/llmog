@@ -1,5 +1,6 @@
 use ansi_stripper::AnsiStripReader;
 use clap::Parser;
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
@@ -48,13 +49,6 @@ struct LogScore {
     score: f64,
 }
 
-// const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Rate how interesting each given line is from a developers's perspective. Rate redundant information lower. First, provide a very brief reasoning; then on a new line, output 'Score: <score>', where <score> is a number from 0 to 100 based on the following scale:
-// - 0-20: routine/unimportant logs
-// - 21-40: minor information
-// - 41-60: noteworthy information
-// - 61-80: important warnings/errors
-// - 81-100: critical errors/security issues";
-
 const SYSTEM_PROMPT: &str =
     "You are a developer log analyzer. Rate each log line by uniqueness, impact, and actionability.
 For each log, output EXACTLY in this format:
@@ -67,50 +61,30 @@ Low (0-30): Routine/minor info
 Medium (31-70): Noteworthy/important
 High (71-100): Critical/security issues";
 
+const MODEL: &str = "llama3.2";
+
+const LINE_WINDOW: usize = 3;
+
 fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let cli = Cli::parse();
 
     const URL: &str = "http://localhost:11434";
     let agent = Agent::new_with_defaults();
-    const MODEL: &str = "llama3.2";
-    //const MODEL: &str = "llama3.2:1b";
-    let mut pull_response = agent
+    agent
         .post(format!("{URL}/api/pull"))
         .send_json(PullParams {
             model: MODEL.to_string(),
             stream: false,
         })?;
-    dbg!(&pull_response);
-    dbg!(pull_response.body_mut().read_to_string()?);
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
-
-    //     const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Given a sequence of log lines rate how interesting the LAST line is from a developer's perspective. Start with a brief reasoning. Then on a new line, rate the interestingness from 0 to 100, where:
-    //     - 0-20: routine/unimportant logs
-    //     - 21-40: minor information
-    //     - 41-60: noteworthy information
-    //     - 61-80: important warnings/errors
-    //     - 81-100: critical errors/security issues
-    //     Output format must be exactly:
-    //     <reason>
-    //     Score: <score>";
-    // const SYSTEM_PROMPT: &str = "You are a developer log analyzer. Given a sequence of log lines rate how interesting the last line is from a developer's perspective. Rate the interestingness from 0 to 100, where:
-    // - 0-20: routine/unimportant logs
-    // - 21-40: minor information
-    // - 41-60: noteworthy information
-    // - 61-80: important warnings/errors
-    // - 81-100: critical errors/security issues
-    // Output format must be exactly:
-    // Score: <score>";
-
-    // the model sometimes likes to prepend Score: even though we tell it not to
-    //let score_re = regex::Regex::new(r"\s*(?i)(?:Score:\s*)?(\d+(?:\.\d+)?)")?;
 
     let response_re =
         regex::Regex::new(r"(?i)(?<reason>.*)\n\s*(?:Score:\s*)?(?<score>\d+(?:\.\d+)?)")?;
 
     let stdout = termcolor::StandardStream::stdout(ColorChoice::Auto);
     let mut so = stdout.lock();
-    const LINE_WINDOW: usize = 3;
     let mut history: VecDeque<(String, String)> = VecDeque::new();
     for line in reader.lines() {
         let line = line?;
@@ -191,11 +165,7 @@ fn main() -> anyhow::Result<()> {
                 history.push_back((line, response.message.content));
             } else {
                 if retry > 10 {
-                    writeln!(
-                        std::io::stderr(),
-                        "bad response from model: {}",
-                        response.message.content
-                    )?;
+                    error!("Bad response from model: {}", response.message.content);
                     so.reset()?;
                     break;
                 } else {
