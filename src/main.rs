@@ -14,9 +14,9 @@ mod ansi_stripper;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Show analysis reason after each line
+    /// Show analysis after each line
     #[arg(long)]
-    show_reason: bool,
+    analysis: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -177,13 +177,13 @@ fn main() -> anyhow::Result<()> {
                 //         .and_then(|caps| caps.get(1))
                 //         .and_then(|m| m.as_str().parse::<f64>().ok())
                 // }) {
-                let color = colorous::TURBO.eval_continuous(score.clamp(0.0, 100.0) / 100.0);
+                let color = colorous::VIRIDIS.eval_continuous(score.clamp(0.0, 100.0) / 100.0);
                 let mut color_spec = ColorSpec::new();
                 color_spec.set_fg(Some(colorous_to_term(color)));
                 so.set_color(&color_spec)?;
                 //writeln!(so, "{reason}")?;
                 write!(so, "{line}")?;
-                if cli.show_reason {
+                if cli.analysis {
                     so.reset()?;
                     write!(so, " : {reason}")?;
                 }
