@@ -71,9 +71,11 @@ const MODEL: &str = "llama3.2";
 
 const LINE_WINDOW: usize = 3;
 
-static GRADIENT: LazyLock<colorgrad::BasisGradient> = LazyLock::new(|| {
+static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
     colorgrad::GradientBuilder::new()
         .colors(&[
+            // duplicate gray to make sure the uninteresting are gray
+            colorgrad::Color::new(0.5, 0.5, 0.5, 1.0),
             colorgrad::Color::new(0.5, 0.5, 0.5, 1.0),
             colorgrad::Color::new(1.0, 1.0, 0.0, 1.0),
             colorgrad::Color::new(1.0, 0.0, 0.0, 1.0),
