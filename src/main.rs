@@ -69,6 +69,7 @@ High (71-100): Critical/security issues";
 
 const MODEL: &str = "llama3.2";
 
+// TODO: make this a cli argument
 const LINE_WINDOW: usize = 3;
 
 static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
@@ -179,7 +180,7 @@ fn main() -> anyhow::Result<()> {
             } else if retry > 10 {
                 warn!("Bad response from model: {}", response.message.content);
                 so.reset()?;
-                break;
+                writeln!(so, "{line}")?;
             } else {
                 continue;
             }
