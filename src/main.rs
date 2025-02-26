@@ -1,7 +1,7 @@
 use ansi_stripper::AnsiStripReader;
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
-use log::error;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
@@ -71,7 +71,7 @@ const MODEL: &str = "llama3.2";
 
 const LINE_WINDOW: usize = 3;
 
-static GRADIENT: LazyLock<colorgrad::BasisGradient> = LazyLock::new(|| {
+static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
     colorgrad::GradientBuilder::new()
         .colors(&[
             colorgrad::Color::new(0.5, 0.5, 0.5, 1.0),
@@ -177,7 +177,7 @@ fn main() -> anyhow::Result<()> {
                     response: response.message.content,
                 });
             } else if retry > 10 {
-                error!("Bad response from model: {}", response.message.content);
+                warn!("Bad response from model: {}", response.message.content);
                 so.reset()?;
                 break;
             } else {
