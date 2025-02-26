@@ -1,11 +1,12 @@
 use ansi_stripper::AnsiStripReader;
 use clap::Parser;
-use colorous::Gradient;
+use colorgrad::Gradient;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
+use std::sync::LazyLock;
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
 use ureq::Agent;
 
@@ -66,7 +67,16 @@ const MODEL: &str = "llama3.2";
 
 const LINE_WINDOW: usize = 3;
 
-const GRADIENT: Gradient = colorous::VIRIDIS;
+static GRADIENT: LazyLock<colorgrad::BasisGradient> = LazyLock::new(|| {
+    colorgrad::GradientBuilder::new()
+        .colors(&[
+            colorgrad::Color::new(0.5, 0.5, 0.5, 1.0),
+            colorgrad::Color::new(1.0, 1.0, 0.0, 1.0),
+            colorgrad::Color::new(1.0, 0.0, 0.0, 1.0),
+        ])
+        .build()
+        .unwrap()
+});
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -144,9 +154,9 @@ fn main() -> anyhow::Result<()> {
                         ))
                     })
             {
-                let color = GRADIENT.eval_continuous(score.clamp(0.0, 100.0) / 100.0);
+                let color = GRADIENT.at((score.clamp(0.0, 100.0) / 100.0) as f32);
                 let mut color_spec = ColorSpec::new();
-                color_spec.set_fg(Some(colorous_to_term(color)));
+                color_spec.set_fg(Some(colorgrad_to_term(color)));
                 so.set_color(&color_spec)?;
                 write!(so, "{line}")?;
                 if cli.analysis {
@@ -176,7 +186,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn colorous_to_term(c: colorous::Color) -> termcolor::Color {
-    let (r, g, b) = c.as_tuple();
+fn colorgrad_to_term(c: colorgrad::Color) -> termcolor::Color {
+    let [r, g, b, _] = c.to_rgba8();
     termcolor::Color::Rgb(r, g, b)
 }
