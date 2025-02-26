@@ -12,7 +12,7 @@ Very much a prototype. Using Llama 3.2 3B currently, which is small, but may sti
 
 ## Prerequisites
 
-- Rust toolchain
+- [Rust toolchain](https://rustup.rs/)
 - [Ollama](https://ollama.ai/) installed and running locally
 
 ## Installation
