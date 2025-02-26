@@ -1,6 +1,6 @@
 use ansi_stripper::AnsiStripReader;
 use clap::Parser;
-use colorgrad::Gradient;
+use colorgrad::{BlendMode, Gradient};
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -78,6 +78,7 @@ static GRADIENT: LazyLock<colorgrad::BasisGradient> = LazyLock::new(|| {
             colorgrad::Color::new(1.0, 1.0, 0.0, 1.0),
             colorgrad::Color::new(1.0, 0.0, 0.0, 1.0),
         ])
+        .mode(BlendMode::Oklab)
         .build()
         .unwrap()
 });
