@@ -106,7 +106,7 @@ fn main() -> anyhow::Result<()> {
         so.flush()?;
         let line = line?;
         if line.trim().is_empty() {
-            writeln!(so, "")?;
+            writeln!(so)?;
             continue;
         }
 
@@ -163,7 +163,7 @@ fn main() -> anyhow::Result<()> {
                     so.reset()?;
                     write!(so, " : {reason}")?;
                 }
-                writeln!(so, "")?;
+                writeln!(so)?;
                 if history.len() > LINE_WINDOW {
                     history.pop_front();
                 }
@@ -171,15 +171,14 @@ fn main() -> anyhow::Result<()> {
                     request: line,
                     response: response.message.content,
                 });
+            } else if retry > 10 {
+                error!("Bad response from model: {}", response.message.content);
+                so.reset()?;
+                break;
             } else {
-                if retry > 10 {
-                    error!("Bad response from model: {}", response.message.content);
-                    so.reset()?;
-                    break;
-                } else {
-                    continue;
-                }
+                continue;
             }
+
             break;
         }
     }
