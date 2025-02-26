@@ -2,6 +2,8 @@
 
 An experimental tool that uses large language models to automatically highlight log files based on the significance of each entry.
 
+![screenshot](docs/screenshot.webp)
+
 The tool processes each log entry through a pre-trained language model, which rates its importance on a scale from 0 to 100. This rating is then used to generate a color-coded output, making it easier to identify critical log entries at a glance.
 
 Very much a prototype. Using Llama 3.2 3B currently, which is small, but may still be very slow depending on hardware.
