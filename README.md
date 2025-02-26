@@ -1,6 +1,6 @@
 # llmog - LLM Log Analyzer
 
-A real-time log analysis tool that uses Large Language Models to evaluate the importance of log entries.
+A real-time log analysis tool that uses a pretrained large language model to evaluate the importance of log entries.
 
 Very much a prototype. Using Llama 3.2 3B currently, which is small, but may still be very slow depending on hardware.
 
@@ -39,3 +39,4 @@ Note that you need a terminal with true color ansi support for this to be useful
 ## Todo
 
 - Handle context size properly
+- Fine tune a model to get better performance
