@@ -1,4 +1,5 @@
 use ansi_stripper::AnsiStripReader;
+use anyhow::bail;
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
 use log::warn;
@@ -91,12 +92,15 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let agent = Agent::new_with_defaults();
-    agent
+    if let Err(e) = agent
         .post(format!("{}/api/pull", cli.ollama_url))
         .send_json(PullParams {
             model: MODEL.to_string(),
             stream: false,
-        })?;
+        })
+    {
+        bail!("Unable to connect to ollama: {e}");
+    }
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
     let response_re =
