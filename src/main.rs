@@ -18,6 +18,10 @@ struct Cli {
     /// Show analysis after each line
     #[arg(long)]
     analysis: bool,
+
+    /// Ollama API URL
+    #[arg(long, default_value = "http://localhost:11434")]
+    ollama_url: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -83,10 +87,9 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    const URL: &str = "http://localhost:11434";
     let agent = Agent::new_with_defaults();
     agent
-        .post(format!("{URL}/api/pull"))
+        .post(format!("{}/api/pull", cli.ollama_url))
         .send_json(PullParams {
             model: MODEL.to_string(),
             stream: false,
@@ -131,7 +134,7 @@ fn main() -> anyhow::Result<()> {
                 content: line.clone(),
             });
             let response: ChatResponse = agent
-                .post(format!("{URL}/api/chat"))
+                .post(format!("{}/api/chat", cli.ollama_url))
                 .send_json(ChatParams {
                     model: MODEL.to_string(),
                     stream: false,
