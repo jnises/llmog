@@ -2,7 +2,7 @@ use ansi_stripper::AnsiStripReader;
 use anyhow::bail;
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
-use log::warn;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
@@ -58,11 +58,15 @@ struct LogScore {
 
 const SYSTEM_PROMPT: &str =
     "You are a developer log analyzer. Rate each log line by uniqueness, impact, and actionability.
-For each log, output EXACTLY in this format:
+For each line, output EXACTLY in this format:
 ```
-[Very brief single-sentence analysis]
+[Very brief single-sentence analysis on a single line]
 SCORE: [0-100]
 ```
+
+Do NOT include any code examples, snippets, or additional explanations.
+Keep responses strictly limited to the analysis and score.
+
 Score guide:
 Low (0-30): Routine/minor info
 Medium (31-70): Noteworthy/important
@@ -88,7 +92,6 @@ static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
-
     let cli = Cli::parse();
 
     let agent = Agent::new_with_defaults();
@@ -104,7 +107,7 @@ fn main() -> anyhow::Result<()> {
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
     let response_re =
-        regex::Regex::new(r"(?i)(?<reason>.*)\n\s*(?:Score:\s*)?(?<score>\d+(?:\.\d+)?)")?;
+        regex::Regex::new(r"(?is)^(?<reason>.*?)\n\s*(?:SCORE):\s*(?<score>\d+(?:\.\d+)?)\s*$")?;
 
     let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
     struct Exchange {
@@ -186,6 +189,7 @@ fn main() -> anyhow::Result<()> {
                 so.reset()?;
                 writeln!(so, "{line}")?;
             } else {
+                debug!("Retrying bad response from model: {}", response.message.content);
                 continue;
             }
 
