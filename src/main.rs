@@ -2,7 +2,7 @@ use ansi_stripper::AnsiStripReader;
 use anyhow::bail;
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
@@ -56,6 +56,11 @@ struct LogScore {
     score: f64,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct Model {
+    name: String,
+}
+
 const SYSTEM_PROMPT: &str =
     "You are a developer log analyzer. Rate each log line by uniqueness, impact, and actionability.
 For each line, output EXACTLY in this format:
@@ -95,6 +100,23 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let agent = Agent::new_with_defaults();
+    // Check if model is already available locally
+    let show_res = agent
+        .post(format!("{}/api/show", cli.ollama_url))
+        .send_json(Model {
+            name: MODEL.to_string(),
+        });
+
+    let model_exists = match show_res {
+        Ok(_) => true,
+        Err(ureq::Error::StatusCode(404)) => false,
+        Err(e) => bail!("Error checking model: {e}"),
+    };
+
+    if !model_exists {
+        info!("Model '{MODEL}' not found locally, pulling...");
+    }
+
     if let Err(e) = agent
         .post(format!("{}/api/pull", cli.ollama_url))
         .send_json(PullParams {
@@ -189,7 +211,10 @@ fn main() -> anyhow::Result<()> {
                 so.reset()?;
                 writeln!(so, "{line}")?;
             } else {
-                debug!("Retrying bad response from model: {}", response.message.content);
+                debug!(
+                    "Retrying bad response from model: {}",
+                    response.message.content
+                );
                 continue;
             }
 
