@@ -8,6 +8,8 @@ The tool processes each log entry through a pre-trained language model, which ra
 
 Very much a prototype. Using Llama 3.2 3B currently, which is small, but may still be very slow depending on hardware.
 
+If you give it something other than a log-file the model has a tendency to get quite confused.
+
 ## Prerequisites
 
 - [Rust toolchain](https://rustup.rs/)
