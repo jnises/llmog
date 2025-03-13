@@ -78,6 +78,7 @@ Medium (31-70): Noteworthy/important
 High (71-100): Critical/security issues";
 
 const MODEL: &str = "llama3.2";
+//const MODEL: &str = "gemma3:4b";
 
 // TODO: make this a cli argument
 const LINE_WINDOW: usize = 3;
@@ -129,7 +130,7 @@ fn main() -> anyhow::Result<()> {
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
     let response_re =
-        regex::Regex::new(r"(?is)^(?<reason>.*?)\n\s*(?:SCORE):\s*(?<score>\d+(?:\.\d+)?)\s*$")?;
+        regex::Regex::new(r"(?is)^(?:(?P<reason>.*?)\n)?\s*SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*$")?;
 
     let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
     struct Exchange {
@@ -184,7 +185,8 @@ fn main() -> anyhow::Result<()> {
                     .captures(&response.message.content)
                     .and_then(|caps| {
                         Some((
-                            caps["reason"].to_string(),
+                            caps.name("reason")
+                                .map_or_else(String::new, |m| m.as_str().trim().to_string()),
                             caps["score"].parse::<f64>().ok()?,
                         ))
                     })
