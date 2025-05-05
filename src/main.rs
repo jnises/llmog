@@ -63,7 +63,8 @@ struct Model {
 
 const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
 Given a sequence of log lines. Rate only the last line. Use the prior lines only for context.
-Rate that line by how interesting you think that line is for diagnosing an issue with the system.
+If a prior line looks unrelated to the last one, disregard it.
+Rate the last line by how interesting you think it is for diagnosing an issue with the system.
 Output EXACTLY in this format:
 ```
 Very brief single-sentence analysis on a single line
