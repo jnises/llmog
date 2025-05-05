@@ -1,5 +1,4 @@
 .env
 .venv
-output
-conversations
-timings.txt
+logfiles
+conversations_dataset
