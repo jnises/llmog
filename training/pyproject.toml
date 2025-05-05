@@ -4,6 +4,7 @@ version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "datasets>=3.5.1",
     "openai>=1.76.2",
     "python-dotenv>=1.1.0",
 ]
