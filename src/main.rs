@@ -31,12 +31,12 @@ struct PullParams {
     stream: bool,
 }
 
-#[derive(Serialize, Deserialize)]
-struct ChatParams {
-    model: String,
-    messages: Vec<Message>,
+#[derive(Serialize)]
+struct ChatParams<'a> {
+    model: &'a str,
+    messages: &'a [Message],
     stream: bool,
-    format: Option<String>,
+    format: Option<&'a str>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,24 +61,27 @@ struct Model {
     name: String,
 }
 
-const SYSTEM_PROMPT: &str =
-    "You are a developer log analyzer. Rate each log line by uniqueness, impact, and actionability.
-For each line, output EXACTLY in this format:
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
+Given a sequence of log lines. Rate only the last line. Use the prior lines only for context.
+Rate that line by how interesting you think that line is for diagnosing an issue with the system.
+Output EXACTLY in this format:
 ```
-[Very brief single-sentence analysis on a single line]
-SCORE: [0-100]
+Very brief single-sentence analysis on a single line
+SCORE: 0-100
 ```
 
 Do NOT include any code examples, snippets, or additional explanations.
 Keep responses strictly limited to the analysis and score.
+Do NOT include any additional framing such as ````.
 
 Score guide:
 Low (0-30): Routine/minor info
 Medium (31-70): Noteworthy/important
-High (71-100): Critical/security issues";
+High (71-100): Critical/security issues
+";
 
-const MODEL: &str = "llama3.2";
-//const MODEL: &str = "gemma3:4b";
+//const MODEL: &str = "gemma3:1b";
+const MODEL: &str = "llmog:latest";
 
 // TODO: make this a cli argument
 const LINE_WINDOW: usize = 3;
@@ -116,62 +119,60 @@ fn main() -> anyhow::Result<()> {
 
     if !model_exists {
         info!("Model '{MODEL}' not found locally, pulling...");
+        if let Err(e) = agent
+            .post(format!("{}/api/pull", cli.ollama_url))
+            .send_json(PullParams {
+                model: MODEL.to_string(),
+                stream: false,
+            })
+        {
+            bail!("Unable to connect to ollama: {e}");
+        }
     }
 
-    if let Err(e) = agent
-        .post(format!("{}/api/pull", cli.ollama_url))
-        .send_json(PullParams {
-            model: MODEL.to_string(),
-            stream: false,
-        })
-    {
-        bail!("Unable to connect to ollama: {e}");
-    }
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
     let response_re =
         regex::Regex::new(r"(?is)^(?:(?P<reason>.*?)\n)?\s*SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*$")?;
 
     let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
-    struct Exchange {
-        request: String,
-        response: String,
-    }
-    let mut history: VecDeque<Exchange> = VecDeque::new();
+    let mut history: VecDeque<String> = VecDeque::new();
     for line in reader.lines() {
         so.flush()?;
         let line = line?;
+        debug_assert!(!line.ends_with('\n'));
+        if history.len() >= LINE_WINDOW {
+            history.pop_front();
+        }
+        history.push_back(line.clone());
         if line.trim().is_empty() {
             writeln!(so)?;
             continue;
         }
 
-        for retry in 0.. {
-            let mut messages = Vec::with_capacity(history.len() + 2);
-            messages.push(Message {
+        let mut line_concat = String::new();
+        for line in &history {
+            line_concat.push_str(line);
+            line_concat.push('\n');
+        }
+        let messages = [
+            Message {
                 role: "system".to_string(),
                 content: SYSTEM_PROMPT.to_string(),
-            });
-            for Exchange { request, response } in &history {
-                messages.push(Message {
-                    role: "user".to_string(),
-                    content: request.clone(),
-                });
-                messages.push(Message {
-                    role: "assistant".to_string(),
-                    content: response.clone(),
-                });
-            }
-            messages.push(Message {
+            },
+            Message {
                 role: "user".to_string(),
-                content: line.clone(),
-            });
+                content: line_concat,
+            },
+        ];
+
+        for retry in 0.. {
             let response: ChatResponse = agent
                 .post(format!("{}/api/chat", cli.ollama_url))
                 .send_json(ChatParams {
-                    model: MODEL.to_string(),
+                    model: &MODEL,
                     stream: false,
-                    messages,
+                    messages: &messages,
                     format: None,
                 })?
                 .body_mut()
@@ -201,13 +202,6 @@ fn main() -> anyhow::Result<()> {
                     write!(so, " : {reason}")?;
                 }
                 writeln!(so)?;
-                if history.len() > LINE_WINDOW {
-                    history.pop_front();
-                }
-                history.push_back(Exchange {
-                    request: line,
-                    response: response.message.content,
-                });
             } else if retry > 10 {
                 warn!("Bad response from model: {}", response.message.content);
                 so.reset()?;
