@@ -81,8 +81,7 @@ Medium (31-70): Noteworthy/important
 High (71-100): Critical/security issues
 ";
 
-//const MODEL: &str = "gemma3:1b";
-const MODEL: &str = "llmog:latest";
+const MODEL: &str = "hf.co/jnises/gemma-3-1b-llmog-Q8_0-GGUF:Q8_0";
 
 // TODO: make this a cli argument
 const LINE_WINDOW: usize = 3;
