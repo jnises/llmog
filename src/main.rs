@@ -78,6 +78,7 @@ SCORE: 0-100
 Do NOT include any code examples, snippets, or additional explanations.
 Keep responses strictly limited to the analysis and score.
 Do NOT include any additional framing such as ````.
+Do NOT start the analysis with \"The last line\" or similar redundant information.
 
 Score guide:
 Low (0-30): Routine/minor info
