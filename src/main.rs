@@ -199,8 +199,10 @@ fn main() -> anyhow::Result<()> {
                 so.set_color(&color_spec)?;
                 write!(so, "{line}")?;
                 if cli.analyze {
-                    so.reset()?;
-                    write!(so, " : {reason}")?;
+                    let mut analyze_color_spec = ColorSpec::new();
+                    analyze_color_spec.set_italic(true);
+                    so.set_color(&analyze_color_spec)?;
+                    write!(so, " » {reason}")?;
                 }
                 writeln!(so)?;
             } else if retry > 10 {
