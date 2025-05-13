@@ -198,7 +198,7 @@ fn main() -> anyhow::Result<()> {
                 color_spec.set_fg(Some(colorgrad_to_term(color)));
                 so.set_color(&color_spec)?;
                 write!(so, "{line}")?;
-                if cli.analysis {
+                if cli.analyze {
                     so.reset()?;
                     write!(so, " : {reason}")?;
                 }
