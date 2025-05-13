@@ -23,6 +23,10 @@ struct Cli {
     /// Ollama API URL
     #[arg(long, default_value = "http://localhost:11434")]
     ollama_url: String,
+
+    /// Number of lines to use for context
+    #[arg(long, default_value = "3")]
+    line_window: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -83,9 +87,6 @@ High (71-100): Critical/security issues
 
 const MODEL: &str = "hf.co/jnises/gemma-3-1b-llmog-GGUF:Q8_0";
 
-// TODO: make this a cli argument
-const LINE_WINDOW: usize = 3;
-
 static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
     colorgrad::GradientBuilder::new()
         .colors(&[
@@ -141,7 +142,7 @@ fn main() -> anyhow::Result<()> {
         so.flush()?;
         let line = line?;
         debug_assert!(!line.ends_with('\n'));
-        if history.len() >= LINE_WINDOW {
+        if history.len() >= cli.line_window {
             history.pop_front();
         }
         history.push_back(line.clone());
