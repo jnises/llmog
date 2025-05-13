@@ -18,7 +18,7 @@ mod ansi_stripper;
 struct Cli {
     /// Show analysis after each line
     #[arg(long)]
-    analysis: bool,
+    analyze: bool,
 
     /// Ollama API URL
     #[arg(long, default_value = "http://localhost:11434")]
