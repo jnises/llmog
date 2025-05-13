@@ -172,7 +172,7 @@ fn main() -> anyhow::Result<()> {
             let response: ChatResponse = agent
                 .post(format!("{}/api/chat", cli.ollama_url))
                 .send_json(ChatParams {
-                    model: &MODEL,
+                    model: MODEL,
                     stream: false,
                     messages: &messages,
                     format: None,
