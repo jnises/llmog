@@ -26,7 +26,7 @@ struct Cli {
 
     /// Number of lines to use for context
     #[arg(long, default_value = "3")]
-    line_window: usize,
+    context: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -142,7 +142,7 @@ fn main() -> anyhow::Result<()> {
         so.flush()?;
         let line = line?;
         debug_assert!(!line.ends_with('\n'));
-        if history.len() >= cli.line_window {
+        if history.len() >= cli.context {
             history.pop_front();
         }
         history.push_back(line.clone());
