@@ -35,7 +35,3 @@ tail -f your.log | llmog
 ```
 
 Note that you need a terminal with true color ansi support for this to be useful.
-
-## Todo
-
-- Handle context size properly
