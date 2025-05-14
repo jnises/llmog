@@ -134,8 +134,9 @@ fn main() -> anyhow::Result<()> {
 
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
-    let response_re =
-        regex::Regex::new(r"(?i)^(?:(?P<reason>.*?)\n)?\s*SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*$")?;
+    let response_re = regex::Regex::new(
+        r"(?i)^(?:```\s*\n?)?(?:(?P<reason>.*?)\n)?\s*SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*(?:```\s*\n?)?$",
+    )?;
 
     let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
     let mut history: VecDeque<String> = VecDeque::new();
