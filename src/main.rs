@@ -187,9 +187,11 @@ fn main() -> anyhow::Result<()> {
             },
         ];
 
+        const MAX_RETRIES: usize = 5;
+        const MAX_TIMEOUTS: usize = 1;
         for retry in 0.. {
             // TODO: don't stop processing just because of temporary errors
-            let response: ChatResponse = client
+            let response: ChatResponse = match client
                 .post(format!("{}/api/chat", cli.ollama_url))
                 .json(&ChatParams {
                     model: MODEL,
@@ -197,12 +199,34 @@ fn main() -> anyhow::Result<()> {
                     messages: &messages,
                     format: None,
                 })
-                .send()?
-                .json()?;
+                .send()
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    // TODO: perhaps use the streaming mode instead to be able to handle the timeout better?
+                    if e.is_timeout() {
+                        // TODO: share the functionality here with the bad response handling below
+                        if retry >= MAX_TIMEOUTS {
+                            warn!("Too many timeouts communicating with ollama");
+                            so.reset()?;
+                            writeln!(so, "{line}")?;
+                            break;
+                        } else {
+                            debug!("Timeout communicating with ollama");
+                            continue;
+                        }
+                    } else {
+                        bail!(e);
+                    }
+                }
+            }
+            .json()?;
+
             if &response.message.role != "assistant" {
                 anyhow::bail!("bad reponse role");
             }
 
+            // TODO: handle format error where the reason has too many lines and just use the last line after first retry
             if let Some((reason, score)) =
                 response_re
                     .captures(&response.message.content)
@@ -226,7 +250,7 @@ fn main() -> anyhow::Result<()> {
                     write!(so, " » {reason}")?;
                 }
                 writeln!(so)?;
-            } else if retry > 10 {
+            } else if retry >= MAX_RETRIES {
                 warn!("Bad response from model: {}", response.message.content);
                 so.reset()?;
                 writeln!(so, "{line}")?;
