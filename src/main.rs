@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use std::sync::LazyLock;
+use std::time::Duration;
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
 
 mod ansi_stripper;
@@ -28,6 +29,10 @@ struct Cli {
     /// Number of lines to use for context
     #[arg(long, default_value = "3")]
     context: usize,
+
+    /// Request timeout in seconds
+    #[arg(long, default_value = "10")]
+    timeout: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -106,7 +111,9 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(Duration::from_secs(cli.timeout))
+        .build()?;
 
     if let Err(e) = client.get(format!("{}/api/version", cli.ollama_url)).send() {
         bail!("Unable to connect to ollama. Is it running?: {e}");
@@ -207,12 +214,18 @@ fn main() -> anyhow::Result<()> {
                     if e.is_timeout() {
                         // TODO: share the functionality here with the bad response handling below
                         if retry >= MAX_TIMEOUTS {
-                            warn!("Too many timeouts communicating with ollama");
+                            warn!(
+                                "Too many timeouts communicating with ollama (timeout: {}s)",
+                                cli.timeout
+                            );
                             so.reset()?;
                             writeln!(so, "{line}")?;
                             break;
                         } else {
-                            debug!("Timeout communicating with ollama");
+                            debug!(
+                                "Timeout communicating with ollama (timeout: {}s)",
+                                cli.timeout
+                            );
                             continue;
                         }
                     } else {
