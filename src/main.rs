@@ -15,6 +15,30 @@ use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
 
 mod ansi_stripper;
 
+
+const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
+Given a sequence of log lines. Rate only the last line. Use the prior lines only for context.
+If a prior line looks unrelated to the last one, disregard it.
+Rate the last line by how interesting you think it is for diagnosing an issue with the system.
+Output EXACTLY in this format:
+```
+Very brief single-sentence analysis on a single line
+SCORE: 0-100
+```
+
+Do NOT include any code examples, snippets, or additional explanations.
+Keep responses strictly limited to the analysis and score.
+Do NOT include any additional framing such as ````.
+Do NOT start the analysis with \"The last line\" or similar redundant information.
+
+Score guide:
+Low (0-30): Routine/minor info
+Medium (31-70): Noteworthy/important
+High (71-100): Critical/security issues
+";
+
+const MODEL: &str = "hf.co/jnises/gemma-3-1b-llmog-GGUF:Q8_0";
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -72,29 +96,6 @@ struct LogScore {
 struct Model {
     name: String,
 }
-
-const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
-Given a sequence of log lines. Rate only the last line. Use the prior lines only for context.
-If a prior line looks unrelated to the last one, disregard it.
-Rate the last line by how interesting you think it is for diagnosing an issue with the system.
-Output EXACTLY in this format:
-```
-Very brief single-sentence analysis on a single line
-SCORE: 0-100
-```
-
-Do NOT include any code examples, snippets, or additional explanations.
-Keep responses strictly limited to the analysis and score.
-Do NOT include any additional framing such as ````.
-Do NOT start the analysis with \"The last line\" or similar redundant information.
-
-Score guide:
-Low (0-30): Routine/minor info
-Medium (31-70): Noteworthy/important
-High (71-100): Critical/security issues
-";
-
-const MODEL: &str = "hf.co/jnises/gemma-3-1b-llmog-GGUF:Q8_0";
 
 static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
     colorgrad::GradientBuilder::new()
