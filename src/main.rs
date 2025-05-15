@@ -31,6 +31,8 @@ struct Cli {
     context: usize,
 
     /// Request timeout in seconds
+    /// 
+    /// Increase if you have slow hardware, long lines or a larger model.
     #[arg(long, default_value = "10")]
     timeout: u64,
 }
