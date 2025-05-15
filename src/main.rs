@@ -8,8 +8,10 @@ use std::collections::VecDeque;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use std::sync::LazyLock;
+use std::time::Duration;
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
 use ureq::Agent;
+use ureq::config::Config;
 
 mod ansi_stripper;
 
@@ -105,7 +107,11 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
-    let agent = Agent::new_with_defaults();
+    let agent = Agent::new_with_config(
+        Config::builder()
+            .timeout_connect(Some(Duration::from_secs(20)))
+            .build(),
+    );
     // Check if model is already available locally
     let show_res = agent
         .post(format!("{}/api/show", cli.ollama_url))
@@ -175,6 +181,7 @@ fn main() -> anyhow::Result<()> {
         ];
 
         for retry in 0.. {
+            // TODO: don't stop processing just because of temporary errors
             let response: ChatResponse = agent
                 .post(format!("{}/api/chat", cli.ollama_url))
                 .send_json(ChatParams {
