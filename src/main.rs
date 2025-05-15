@@ -121,13 +121,18 @@ fn main() -> anyhow::Result<()> {
 
     if !model_exists {
         info!("Model '{MODEL}' not found locally, pulling...");
-        if let Err(e) = agent
-            .post(format!("{}/api/pull", cli.ollama_url))
-            .send_json(PullParams {
-                model: MODEL.to_string(),
-                stream: false,
-            })
-        {
+    }
+    //  we pull even if the model exists in case it has been updated
+    if let Err(e) = agent
+        .post(format!("{}/api/pull", cli.ollama_url))
+        .send_json(PullParams {
+            model: MODEL.to_string(),
+            stream: false,
+        })
+    {
+        if model_exists {
+            debug!("Unable to pull model. But it was already downloaded so that's ok: {e}");
+        } else {
             bail!("Unable to connect to ollama: {e}");
         }
     }
