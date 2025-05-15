@@ -3,15 +3,14 @@ use anyhow::bail;
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
 use log::{debug, info, warn};
+use reqwest::StatusCode;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use std::sync::LazyLock;
-use std::time::Duration;
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
-use ureq::Agent;
-use ureq::config::Config;
 
 mod ansi_stripper;
 
@@ -107,34 +106,42 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
-    let agent = Agent::new_with_config(
-        Config::builder()
-            .timeout_connect(Some(Duration::from_secs(20)))
-            .build(),
-    );
+    let client = Client::new();
+
+    if let Err(e) = client.get(format!("{}/api/version", cli.ollama_url)).send() {
+        bail!("Unable to connect to ollama. Is it running?: {e}");
+    }
+
     // Check if model is already available locally
-    let show_res = agent
+    let show_res = client
         .post(format!("{}/api/show", cli.ollama_url))
-        .send_json(Model {
+        .json(&Model {
             name: MODEL.to_string(),
-        });
+        })
+        .send();
 
     let model_exists = match show_res {
         Ok(_) => true,
-        Err(ureq::Error::StatusCode(404)) => false,
-        Err(e) => bail!("Error checking model: {e}"),
+        Err(e) => {
+            if let Some(StatusCode::NOT_FOUND) = e.status() {
+                false
+            } else {
+                bail!("Error checking model: {e}")
+            }
+        }
     };
 
     if !model_exists {
         info!("Model '{MODEL}' not found locally, pulling...");
     }
     //  we pull even if the model exists in case it has been updated
-    if let Err(e) = agent
+    if let Err(e) = client
         .post(format!("{}/api/pull", cli.ollama_url))
-        .send_json(PullParams {
+        .json(&PullParams {
             model: MODEL.to_string(),
             stream: false,
         })
+        .send()
     {
         if model_exists {
             debug!("Unable to pull model. But it was already downloaded so that's ok: {e}");
@@ -182,16 +189,16 @@ fn main() -> anyhow::Result<()> {
 
         for retry in 0.. {
             // TODO: don't stop processing just because of temporary errors
-            let response: ChatResponse = agent
+            let response: ChatResponse = client
                 .post(format!("{}/api/chat", cli.ollama_url))
-                .send_json(ChatParams {
+                .json(&ChatParams {
                     model: MODEL,
                     stream: false,
                     messages: &messages,
                     format: None,
-                })?
-                .body_mut()
-                .read_json()?;
+                })
+                .send()?
+                .json()?;
             if &response.message.role != "assistant" {
                 anyhow::bail!("bad reponse role");
             }
