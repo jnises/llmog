@@ -42,3 +42,7 @@ tail -f your.log | llmog
 - `--timeout=SECONDS`: Request timeout in seconds (default: 10)
 
 Note that you need a terminal with true color ansi support for this to be useful.
+
+## TODO
+
+- Finetune using non-log files to make sure the model doesn't get confused.
