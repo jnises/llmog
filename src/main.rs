@@ -15,7 +15,6 @@ use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
 
 mod ansi_stripper;
 
-
 const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
 Given a sequence of log lines. Rate only the last line. Use the prior lines only for context.
 If a prior line looks unrelated to the last one, disregard it.
@@ -55,7 +54,7 @@ struct Cli {
     context: usize,
 
     /// Request timeout in seconds
-    /// 
+    ///
     /// Increase if you have slow hardware, long lines or a larger model.
     #[arg(long, default_value = "10")]
     timeout: u64,
@@ -163,7 +162,7 @@ fn main() -> anyhow::Result<()> {
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
     let response_re = regex::Regex::new(
-        r"(?i)^(?:```\s*\n?)?(?:(?P<reason>.*?)\n)?\s*SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*(?:```\s*\n?)?$",
+        r"(?i)^(?:```\s*\n?)?(?P<reason>(?:.*\n)*?)SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*(?:```\s*\n?)?$",
     )?;
 
     let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
@@ -242,18 +241,29 @@ fn main() -> anyhow::Result<()> {
                 anyhow::bail!("bad reponse role");
             }
 
-            // TODO: handle format error where the reason has too many lines and just use the last line after first retry
-            if let Some((reason, score)) =
-                response_re
-                    .captures(&response.message.content)
-                    .and_then(|caps| {
-                        Some((
-                            caps.name("reason")
-                                .map_or_else(String::new, |m| m.as_str().trim().to_string()),
-                            caps["score"].parse::<f64>().ok()?,
-                        ))
-                    })
+            // Extract the reason and score from the response
+            if let Some((mut reason, score)) = response_re
+                .captures(&response.message.content)
+                .and_then(|caps| {
+                    Some((
+                        caps.name("reason")
+                            .map_or_else(String::new, |m| m.as_str().to_string()),
+                        caps["score"].parse::<f64>().ok()?,
+                    ))
+                })
             {
+                let reason_lines: Vec<_> = reason.lines().collect();
+                if reason_lines.len() > 1 && retry == 0 {
+                    // If this is the first attempt and we got a multi-line reason, retry
+                    // if it keeps giving us multiple lines, just pick the last one to avoid too many retries
+                    debug!(
+                        "First attempt returned multi-line reason, retrying: {}",
+                        response.message.content
+                    );
+                    continue;
+                }
+                reason = reason_lines.last().unwrap_or(&"").trim().to_string();
+
                 let color = GRADIENT.at((score.clamp(0.0, 100.0) / 100.0) as f32);
                 let mut color_spec = ColorSpec::new();
                 color_spec.set_fg(Some(colorgrad_to_term(color)));
