@@ -127,10 +127,14 @@ fn main() -> anyhow::Result<()> {
         .json(&Model {
             name: MODEL.to_string(),
         })
-        .send();
+        .send()
+        .and_then(|r| r.error_for_status());
 
     let model_exists = match show_res {
-        Ok(_) => true,
+        Ok(res) => {
+            debug!("local model found: {res:?}");
+            true
+        }
         Err(e) => {
             if let Some(StatusCode::NOT_FOUND) = e.status() {
                 false
