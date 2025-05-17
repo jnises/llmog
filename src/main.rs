@@ -117,7 +117,11 @@ fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(cli.timeout))
         .build()?;
 
-    if let Err(e) = client.get(format!("{}/api/version", cli.ollama_url)).send() {
+    if let Err(e) = client
+        .get(format!("{}/api/version", cli.ollama_url))
+        .send()
+        .and_then(|r| r.error_for_status())
+    {
         bail!("Unable to connect to ollama. Is it running?: {e}");
     }
 
@@ -155,6 +159,7 @@ fn main() -> anyhow::Result<()> {
             stream: false,
         })
         .send()
+        .and_then(|r| r.error_for_status())
     {
         if model_exists {
             debug!("Unable to pull model. But it was already downloaded so that's ok: {e}");
