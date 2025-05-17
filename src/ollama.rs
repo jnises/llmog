@@ -59,6 +59,9 @@ impl Ollama {
     pub fn pull(&self) -> anyhow::Result<()> {
         self.client
             .post(format!("{}/api/pull", self.ollama_url))
+            // Two minutes should be enough for everyone..
+            // Better to use the streaming mode to get continuous updates, but reqwest blocking don't expose the separate chunks, just a stream, so parsing would be a bit tricky
+            .timeout(Duration::from_secs(120))
             .json(&PullParams {
                 model: self.model.clone(),
                 stream: false,
