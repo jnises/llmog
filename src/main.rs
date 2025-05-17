@@ -131,8 +131,8 @@ fn main() -> anyhow::Result<()> {
         .and_then(|r| r.error_for_status());
 
     let model_exists = match show_res {
-        Ok(res) => {
-            debug!("local model found: {res:?}");
+        Ok(_) => {
+            debug!("Model already present locally");
             true
         }
         Err(e) => {
