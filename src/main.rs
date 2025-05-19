@@ -16,18 +16,25 @@ mod ansi_stripper;
 mod ollama;
 
 const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
-Given a sequence of log lines. Rate only the last line. Use the prior lines only for context.
+Given a sequence of lines of text. Determine if it looks like a log file or not.
+If it looks like a log rate the last line by how interesting you think it is for diagnosing an issue with the system.
+Rate only the last line. Use the prior lines only for context.
 If a prior line looks unrelated to the last one, disregard it.
-Rate the last line by how interesting you think it is for diagnosing an issue with the system.
 Output EXACTLY in this format:
 ```
 Very brief single-sentence analysis on a single line
 SCORE: 0-100
 ```
 
+If it doesn't look like a log file just respond with:
+```
+Not a log
+SCORE: 0
+```
+
 Do NOT include any code examples, snippets, or additional explanations.
 Keep responses strictly limited to the analysis and score.
-Do NOT include any additional framing such as ````.
+Do NOT include any additional framing such as ```.
 Do NOT start the analysis with \"The last line\" or similar redundant information.
 
 Score guide:
