@@ -3,67 +3,17 @@ use anyhow::bail;
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
 use log::{debug, info, warn};
+use ollama::{Message, Ollama};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use std::sync::LazyLock;
+use std::time::Duration;
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
-use ureq::Agent;
 
 mod ansi_stripper;
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    /// Show analysis after each line
-    #[arg(long)]
-    analyze: bool,
-
-    /// Ollama API URL
-    #[arg(long, default_value = "http://localhost:11434")]
-    ollama_url: String,
-
-    /// Number of lines to use for context
-    #[arg(long, default_value = "3")]
-    context: usize,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PullParams {
-    model: String,
-    stream: bool,
-}
-
-#[derive(Serialize)]
-struct ChatParams<'a> {
-    model: &'a str,
-    messages: &'a [Message],
-    stream: bool,
-    format: Option<&'a str>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Message {
-    role: String,
-    content: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ChatResponse {
-    message: Message,
-}
-
-#[derive(Serialize, Deserialize)]
-struct LogScore {
-    reasoning: String,
-    score: f64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Model {
-    name: String,
-}
+mod ollama;
 
 const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
 Given a sequence of log lines. Rate only the last line. Use the prior lines only for context.
@@ -88,6 +38,34 @@ High (71-100): Critical/security issues
 
 const MODEL: &str = "hf.co/jnises/gemma-3-1b-llmog-GGUF:Q8_0";
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Show analysis after each line
+    #[arg(long)]
+    analyze: bool,
+
+    /// Ollama API URL
+    #[arg(long, default_value = "http://localhost:11434")]
+    ollama_url: String,
+
+    /// Number of lines to use for context
+    #[arg(long, default_value = "3")]
+    context: usize,
+
+    /// Request timeout in seconds
+    ///
+    /// Increase if you have slow hardware, long lines or a larger model.
+    #[arg(long, default_value = "10")]
+    timeout: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LogScore {
+    reasoning: String,
+    score: f64,
+}
+
 static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
     colorgrad::GradientBuilder::new()
         .colors(&[
@@ -105,37 +83,29 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
-    let agent = Agent::new_with_defaults();
-    // Check if model is already available locally
-    let show_res = agent
-        .post(format!("{}/api/show", cli.ollama_url))
-        .send_json(Model {
-            name: MODEL.to_string(),
-        });
-
-    let model_exists = match show_res {
-        Ok(_) => true,
-        Err(ureq::Error::StatusCode(404)) => false,
-        Err(e) => bail!("Error checking model: {e}"),
-    };
-
+    let ol = Ollama::new(
+        cli.ollama_url,
+        MODEL.to_string(),
+        Duration::from_secs(cli.timeout),
+    )?;
+    let model_exists = ol.model_exists()?;
     if !model_exists {
         info!("Model '{MODEL}' not found locally, pulling...");
-        if let Err(e) = agent
-            .post(format!("{}/api/pull", cli.ollama_url))
-            .send_json(PullParams {
-                model: MODEL.to_string(),
-                stream: false,
-            })
-        {
-            bail!("Unable to connect to ollama: {e}");
+    }
+    //  we pull even if the model exists in case it has been updated
+    if let Err(e) = ol.pull() {
+        if model_exists {
+            debug!("Unable to pull model. But it was already downloaded so that's ok: {e}");
+        } else {
+            bail!("Unable to pull model: {e}");
         }
     }
 
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
-    let response_re =
-        regex::Regex::new(r"(?i)^(?:(?P<reason>.*?)\n)?\s*SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*$")?;
+    let response_re = regex::Regex::new(
+        r"(?i)^(?:```\s*\n?)?(?P<reason>(?:.*\n)*?)SCORE:\s*(?P<score>\d+(?:\.\d+)?)\s*(?:```\s*\n?)?$",
+    )?;
 
     let mut so = termcolor::BufferedStandardStream::stdout(ColorChoice::Auto);
     let mut history: VecDeque<String> = VecDeque::new();
@@ -168,32 +138,59 @@ fn main() -> anyhow::Result<()> {
             },
         ];
 
+        const MAX_RETRIES: usize = 5;
+        const MAX_TIMEOUTS: usize = 1;
         for retry in 0.. {
-            let response: ChatResponse = agent
-                .post(format!("{}/api/chat", cli.ollama_url))
-                .send_json(ChatParams {
-                    model: MODEL,
-                    stream: false,
-                    messages: &messages,
-                    format: None,
-                })?
-                .body_mut()
-                .read_json()?;
-            if &response.message.role != "assistant" {
-                anyhow::bail!("bad reponse role");
-            }
+            let response = match ol.chat(&messages) {
+                Ok(r) => r,
+                Err(ollama::Error::Reqwest(e)) => {
+                    // TODO: perhaps use the streaming mode instead to be able to handle the timeout better?
+                    if e.is_timeout() {
+                        // TODO: share the functionality here with the bad response handling below
+                        if retry >= MAX_TIMEOUTS {
+                            warn!(
+                                "Too many timeouts communicating with ollama (timeout: {}s)",
+                                cli.timeout
+                            );
+                            so.reset()?;
+                            writeln!(so, "{line}")?;
+                            break;
+                        } else {
+                            debug!(
+                                "Timeout communicating with ollama (timeout: {}s)",
+                                cli.timeout
+                            );
+                            continue;
+                        }
+                    } else {
+                        bail!(e);
+                    }
+                }
+                Err(e) => {
+                    bail!(e);
+                }
+            };
 
-            if let Some((reason, score)) =
-                response_re
-                    .captures(&response.message.content)
-                    .and_then(|caps| {
-                        Some((
-                            caps.name("reason")
-                                .map_or_else(String::new, |m| m.as_str().trim().to_string()),
-                            caps["score"].parse::<f64>().ok()?,
-                        ))
-                    })
-            {
+            // Extract the reason and score from the response
+            if let Some((mut reason, score)) = response_re.captures(&response).and_then(|caps| {
+                Some((
+                    caps.name("reason")
+                        .map_or_else(String::new, |m| m.as_str().to_string()),
+                    caps["score"].parse::<f64>().ok()?,
+                ))
+            }) {
+                let reason_lines: Vec<_> = reason.lines().collect();
+                if reason_lines.len() > 1 && retry == 0 {
+                    // If this is the first attempt and we got a multi-line reason, retry
+                    // if it keeps giving us multiple lines, just pick the last one to avoid too many retries
+                    debug!(
+                        "First attempt returned multi-line reason, retrying: {}",
+                        response
+                    );
+                    continue;
+                }
+                reason = reason_lines.last().unwrap_or(&"").trim().to_string();
+
                 let color = GRADIENT.at((score.clamp(0.0, 100.0) / 100.0) as f32);
                 let mut color_spec = ColorSpec::new();
                 color_spec.set_fg(Some(colorgrad_to_term(color)));
@@ -206,15 +203,12 @@ fn main() -> anyhow::Result<()> {
                     write!(so, " » {reason}")?;
                 }
                 writeln!(so)?;
-            } else if retry > 10 {
-                warn!("Bad response from model: {}", response.message.content);
+            } else if retry >= MAX_RETRIES {
+                warn!("Bad response from model: {response}");
                 so.reset()?;
                 writeln!(so, "{line}")?;
             } else {
-                debug!(
-                    "Retrying bad response from model: {}",
-                    response.message.content
-                );
+                debug!("Retrying bad response from model: {response}");
                 continue;
             }
 
