@@ -34,4 +34,15 @@ Pipe your logs into llmog:
 tail -f your.log | llmog
 ```
 
+### Options
+
+- `--analyze`: Show analysis after each log line
+- `--ollama-url=URL`: Set custom Ollama API URL (default: http://localhost:11434)
+- `--context=N`: Number of lines to use for context (default: 3)
+- `--timeout=SECONDS`: Request timeout in seconds (default: 10)
+
 Note that you need a terminal with true color ansi support for this to be useful.
+
+## TODO
+
+- Finetune using non-log files to make sure the model doesn't get confused.
