@@ -84,7 +84,7 @@ impl Ollama {
             .send()?
             .json()?;
         if &response.message.role != "assistant" {
-            return Err(Error::Role("bad reponse role".to_string()));
+            return Err(Error::Role(response.message.role.clone()));
         }
         Ok(response.message.content)
     }
