@@ -10,8 +10,11 @@ colorgrad = "0.7"
 env_logger = "0.11.6"
 log = "0.4.26"
 regex = "1.11.1"
-reqwest = { version = "0.12.15", features = ["blocking", "json"] }
 serde = { version = "1.0.217", features = ["derive"] }
 strip-ansi-escapes = "0.2.1"
+candle-core = "0.5.1" # Placeholder, ideally find latest
+candle-transformers = "0.5.1" # Placeholder, ideally find latest
+tokenizers = "0.15.2" # Placeholder, ideally find latest
+hf-hub = "0.3.2" # Placeholder, ideally find latest
 termcolor = "1.4.1"
 thiserror = "2.0.12"

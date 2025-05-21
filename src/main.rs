@@ -3,17 +3,18 @@ use anyhow::bail;
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
 use log::{debug, info, warn};
-use ollama::{Message, Ollama};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
 use std::sync::LazyLock;
-use std::time::Duration;
+// use std::time::Duration; // No longer needed for CLI timeout
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
+use candle_core::Device; // For Device selection
 
 mod ansi_stripper;
-mod ollama;
+mod candle_model;
+use candle_model::CandleModel;
 
 const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
 Given a sequence of lines of text. Determine if it looks like a log file or not.
@@ -52,19 +53,49 @@ struct Cli {
     #[arg(long)]
     analyze: bool,
 
-    /// Ollama API URL
-    #[arg(long, default_value = "http://localhost:11434")]
-    ollama_url: String,
-
     /// Number of lines to use for context
     #[arg(long, default_value = "3")]
     context: usize,
 
-    /// Request timeout in seconds
-    ///
-    /// Increase if you have slow hardware, long lines or a larger model.
-    #[arg(long, default_value = "10")]
-    timeout: u64,
+    /// Maximum number of tokens to generate for the analysis.
+    #[arg(long, default_value = "200")]
+    max_tokens: usize,
+
+    /// Force CPU usage, even if CUDA is available.
+    #[arg(long)]
+    cpu: bool,
+
+    /// Model repository ID on Hugging Face Hub.
+    #[arg(long)]
+    model_repo: Option<String>,
+
+    /// GGUF filename within the repository (e.g., model-Q8_0.gguf).
+    #[arg(long)]
+    gguf_file: Option<String>,
+
+    /// Tokenizer filename within the repository (e.g., tokenizer.json).
+    #[arg(long)]
+    tokenizer_file: Option<String>,
+
+    /// Seed for random number generation.
+    #[arg(long, default_value = "299792458")]
+    seed: u64,
+
+    /// Temperature for sampling.
+    #[arg(long)]
+    temperature: Option<f64>,
+
+    /// Top-P probability for nucleus sampling.
+    #[arg(long)]
+    top_p: Option<f64>,
+
+    /// Penalty for repeating tokens.
+    #[arg(long, default_value = "1.1")]
+    repeat_penalty: f32,
+
+    /// Context size for repeat penalty.
+    #[arg(long, default_value = "64")]
+    repeat_last_n: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -86,27 +117,40 @@ static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
         .unwrap()
 });
 
+// Helper function to select device
+fn device(cpu: bool) -> Result<Device, E> {
+    if cpu {
+        Ok(Device::Cpu)
+    } else {
+        let device = Device::cuda_if_available(0)?;
+        if !device.is_cuda() {
+            info!("CUDA not available, using CPU.");
+        }
+        Ok(device)
+    }
+}
+
 fn main() -> anyhow::Result<()> {
+    use anyhow::Error as E; // For anyhow::Result on device fn
+
     env_logger::init();
     let cli = Cli::parse();
 
-    let ol = Ollama::new(
-        cli.ollama_url,
-        MODEL.to_string(),
-        Duration::from_secs(cli.timeout),
-    )?;
-    let model_exists = ol.model_exists()?;
-    if !model_exists {
-        info!("Model '{MODEL}' not found locally, pulling...");
-    }
-    //  we pull even if the model exists in case it has been updated
-    if let Err(e) = ol.pull() {
-        if model_exists {
-            debug!("Unable to pull model. But it was already downloaded so that's ok: {e}");
-        } else {
-            bail!("Unable to pull model: {e}");
-        }
-    }
+    let device = device(cli.cpu)?;
+    info!("Using device: {:?}", device);
+
+    let mut candle_model = CandleModel::new(
+        cli.model_repo,
+        cli.gguf_file,
+        cli.tokenizer_file,
+        cli.seed,
+        cli.temperature,
+        cli.top_p,
+        cli.repeat_penalty,
+        cli.repeat_last_n,
+        device,
+    )
+    .map_err(|e| E::msg(format!("Failed to initialize Candle model: {e}")))?;
 
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
@@ -134,47 +178,21 @@ fn main() -> anyhow::Result<()> {
             line_concat.push_str(line);
             line_concat.push('\n');
         }
-        let messages = [
-            Message {
-                role: "system".to_string(),
-                content: SYSTEM_PROMPT.to_string(),
-            },
-            Message {
-                role: "user".to_string(),
-                content: line_concat,
-            },
-        ];
+        // The old messages array is no longer needed as candle_model.chat takes system and user prompts separately.
 
-        const MAX_RETRIES: usize = 5;
-        const MAX_TIMEOUTS: usize = 1;
+        const MAX_RETRIES: usize = 5; // Keep retries for parsing model output
+        // MAX_TIMEOUTS is no longer relevant as chat is a direct call.
         for retry in 0.. {
-            let response = match ol.chat(&messages) {
+            let response = match candle_model.chat(SYSTEM_PROMPT, &line_concat, cli.max_tokens) {
                 Ok(r) => r,
-                Err(ollama::Error::Reqwest(e)) => {
-                    // TODO: perhaps use the streaming mode instead to be able to handle the timeout better?
-                    if e.is_timeout() {
-                        // TODO: share the functionality here with the bad response handling below
-                        if retry >= MAX_TIMEOUTS {
-                            warn!(
-                                "Too many timeouts communicating with ollama (timeout: {}s)",
-                                cli.timeout
-                            );
-                            so.reset()?;
-                            writeln!(so, "{line}")?;
-                            break;
-                        } else {
-                            debug!(
-                                "Timeout communicating with ollama (timeout: {}s)",
-                                cli.timeout
-                            );
-                            continue;
-                        }
-                    } else {
-                        bail!(e);
-                    }
-                }
                 Err(e) => {
-                    bail!(e);
+                    // Candle errors are typically fatal for a given request,
+                    // but we might want to log and continue for the next line, or bail.
+                    // For now, let's warn and skip to the next line.
+                    warn!("Error during Candle model chat: {e}");
+                    so.reset()?;
+                    writeln!(so, "{line}")?; // Print the original line if analysis fails
+                    break; // Break from retry loop for this line
                 }
             };
 
