@@ -1,19 +1,20 @@
 use ansi_stripper::AnsiStripReader;
-use anyhow::bail;
+use anyhow::{bail, Context}; // Ensure Context is imported
 use clap::Parser;
 use colorgrad::{BlendMode, Gradient};
-use log::{debug, info, warn};
-use ollama::{Message, Ollama};
+use log::{debug, error, info, warn}; // Ensure error is imported
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::Write as _;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf; // Added for model_cache_dir
 use std::sync::LazyLock;
 use std::time::Duration;
 use termcolor::{ColorChoice, ColorSpec, WriteColor as _};
 
 mod ansi_stripper;
-mod ollama;
+mod mistralrs_local; // Added
+use mistralrs_local::{MistralLocalEngine, MistralLocalError, UserMessage}; // Added
 
 const SYSTEM_PROMPT: &str = "You are a developer log analyzer.
 Given a sequence of lines of text. Determine if it looks like a log file or not.
@@ -43,7 +44,7 @@ Medium (31-70): Noteworthy/important
 High (71-100): Critical/security issues
 ";
 
-const MODEL: &str = "hf.co/jnises/gemma-3-1b-llmog-GGUF:Q8_0";
+// const MODEL: &str = "hf.co/jnises/gemma-3-1b-llmog-GGUF:Q8_0"; // Removed
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -52,9 +53,25 @@ struct Cli {
     #[arg(long)]
     analyze: bool,
 
-    /// Ollama API URL
-    #[arg(long, default_value = "http://localhost:11434")]
-    ollama_url: String,
+    /// Hugging Face model repository ID (e.g., "TheBloke/Mistral-7B-Instruct-v0.2-GGUF")
+    #[arg(long)]
+    model_repo_id: String,
+
+    /// Filename of the GGUF model in the repository (e.g., "mistral-7b-instruct-v0.2.Q4_K_M.gguf")
+    #[arg(long)]
+    model_filename: String,
+
+    /// Optional: Filename of the tokenizer.json in the repository (e.g., "tokenizer.json")
+    #[arg(long)]
+    tokenizer_filename: Option<String>,
+
+    /// Optional: Log level for GGUF loader (trace, debug, info, warn, error, silence). Default: silence
+    #[arg(long, default_value = "silence")]
+    gguf_log_level: String,
+
+    /// Optional: Custom cache directory for Hugging Face models.
+    #[arg(long)]
+    model_cache_dir: Option<PathBuf>,
 
     /// Number of lines to use for context
     #[arg(long, default_value = "3")]
@@ -86,27 +103,43 @@ static GRADIENT: LazyLock<colorgrad::LinearGradient> = LazyLock::new(|| {
         .unwrap()
 });
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
-    let ol = Ollama::new(
-        cli.ollama_url,
-        MODEL.to_string(),
-        Duration::from_secs(cli.timeout),
-    )?;
-    let model_exists = ol.model_exists()?;
-    if !model_exists {
-        info!("Model '{MODEL}' not found locally, pulling...");
-    }
-    //  we pull even if the model exists in case it has been updated
-    if let Err(e) = ol.pull() {
-        if model_exists {
-            debug!("Unable to pull model. But it was already downloaded so that's ok: {e}");
-        } else {
-            bail!("Unable to pull model: {e}");
+    let gguf_log_level_str = cli.gguf_log_level.to_lowercase();
+    let gguf_log_level = match gguf_log_level_str.as_str() {
+        "trace" => mistralrs::gguf::LogLevel::Trace,
+        "debug" => mistralrs::gguf::LogLevel::Debug,
+        "info" => mistralrs::gguf::LogLevel::Info,
+        "warn" => mistralrs::gguf::LogLevel::Warn,
+        "error" => mistralrs::gguf::LogLevel::Error,
+        "silence" => mistralrs::gguf::LogLevel::Silence,
+        _ => {
+            warn!(
+                "Invalid GGUF log level '{}'. Defaulting to Silence.",
+                cli.gguf_log_level
+            );
+            mistralrs::gguf::LogLevel::Silence
         }
-    }
+    };
+
+    info!(
+        "Initializing MistralLocalEngine with model repo: {}, file: {}",
+        cli.model_repo_id, cli.model_filename
+    );
+    let engine = MistralLocalEngine::new(
+        cli.model_repo_id.clone(),
+        cli.model_filename.clone(),
+        cli.tokenizer_filename.clone(),
+        gguf_log_level,
+        cli.model_cache_dir.clone(),
+        Duration::from_secs(cli.timeout * 3), // Increased timeout for potential model downloads
+    )
+    .await
+    .context("Failed to initialize MistralLocalEngine")?;
+    info!("MistralLocalEngine initialized successfully.");
 
     let reader = BufReader::new(AnsiStripReader::new(std::io::stdin().lock()));
 
@@ -130,51 +163,77 @@ fn main() -> anyhow::Result<()> {
         }
 
         let mut line_concat = String::new();
-        for line in &history {
-            line_concat.push_str(line);
+        for hist_line in &history { // Renamed inner variable to avoid conflict if needed
+            line_concat.push_str(hist_line);
             line_concat.push('\n');
         }
-        let messages = [
-            Message {
+
+        let user_messages = vec![
+            UserMessage {
                 role: "system".to_string(),
                 content: SYSTEM_PROMPT.to_string(),
             },
-            Message {
+            UserMessage {
                 role: "user".to_string(),
-                content: line_concat,
+                content: line_concat.clone(), // Use accumulated history
             },
         ];
 
         const MAX_RETRIES: usize = 5;
-        const MAX_TIMEOUTS: usize = 1;
+        // const MAX_TIMEOUTS: usize = 1; // Removed
+
         for retry in 0.. {
-            let response = match ol.chat(&messages) {
+            let chat_result = engine
+                .chat(user_messages.clone(), Duration::from_secs(cli.timeout))
+                .await;
+
+            let response = match chat_result {
                 Ok(r) => r,
-                Err(ollama::Error::Reqwest(e)) => {
-                    // TODO: perhaps use the streaming mode instead to be able to handle the timeout better?
-                    if e.is_timeout() {
-                        // TODO: share the functionality here with the bad response handling below
-                        if retry >= MAX_TIMEOUTS {
-                            warn!(
-                                "Too many timeouts communicating with ollama (timeout: {}s)",
-                                cli.timeout
+                Err(e) => {
+                    match e {
+                        MistralLocalError::InferenceTimeout(d) => {
+                            warn!("Inference for line '{}' timed out after {:?}", line, d);
+                        }
+                        MistralLocalError::MistralRsError(m_err) => {
+                            warn!("MistralRs engine error for line '{}': {}", line, m_err);
+                        }
+                        MistralLocalError::NoResponseContent => {
+                            // This will make the response an empty string,
+                            // causing regex match to fail and trigger retry logic.
+                            debug!("No content in model response for line '{}'. Retrying if possible.", line);
+                            String::new() 
+                        }
+                        _ => {
+                            error!(
+                                "Fatal error processing line '{}': {:?}. Check model configuration or engine state.",
+                                line, e
                             );
                             so.reset()?;
                             writeln!(so, "{line}")?;
-                            break;
-                        } else {
-                            debug!(
-                                "Timeout communicating with ollama (timeout: {}s)",
-                                cli.timeout
-                            );
-                            continue;
+                            break; // Break from the retry loop for this line
                         }
-                    } else {
-                        bail!(e);
+                    };
+                    // If the error was InferenceTimeout or MistralRsError, also print line and break retry.
+                    if matches!(e, MistralLocalError::InferenceTimeout(_) | MistralLocalError::MistralRsError(_)) {
+                        so.reset()?;
+                        writeln!(so, "{line}")?;
+                        break; // Break from the retry loop for this specific line
                     }
-                }
-                Err(e) => {
-                    bail!(e);
+                    // If it was NoResponseContent, `response` is String::new() and will be handled by regex logic.
+                    // If it was a fatal error (the `_` arm), we already broke.
+                    // If we reach here due to NoResponseContent, `response` is empty.
+                    // Otherwise, if we broke, this assignment isn't strictly needed but harmless.
+                    if !matches!(e, MistralLocalError::NoResponseContent) { // Avoid reassigning if it was NoResponseContent
+                        // This path should ideally not be taken if a break occurred.
+                        // If an error occurred that implies we can't proceed with regex parsing
+                        error!("Failed to get usable chat response for line '{}': {:?}", line, e);
+                        so.reset()?;
+                        writeln!(so, "{line}")?;
+                        break; // Break from retry loop
+                    }
+                    // If NoResponseContent, response is already String::new()
+                    // Fall through to regex check which will fail and trigger retry/max_retries logic
+                    String::new() // Ensure response is assigned for the NoResponseContent case if not already
                 }
             };
 
@@ -188,15 +247,17 @@ fn main() -> anyhow::Result<()> {
             }) {
                 let reason_lines: Vec<_> = reason.lines().collect();
                 if reason_lines.len() > 1 && retry == 0 {
-                    // If this is the first attempt and we got a multi-line reason, retry
-                    // if it keeps giving us multiple lines, just pick the last one to avoid too many retries
                     debug!(
-                        "First attempt returned multi-line reason, retrying: {}",
-                        response
+                        "First attempt for line '{}' returned multi-line reason, retrying: {}",
+                        line, response
                     );
                     continue;
                 }
                 reason = reason_lines.last().unwrap_or(&"").trim().to_string();
+                if reason.is_empty() && score == 0.0 && response.to_lowercase().contains("not a log") {
+                     reason = "Not a log".to_string(); // Normalize "Not a log"
+                }
+
 
                 let color = GRADIENT.at((score.clamp(0.0, 100.0) / 100.0) as f32);
                 let mut color_spec = ColorSpec::new();
@@ -210,16 +271,24 @@ fn main() -> anyhow::Result<()> {
                     write!(so, " » {reason}")?;
                 }
                 writeln!(so)?;
+                break; // Break from retry loop on success
             } else if retry >= MAX_RETRIES {
-                warn!("Bad response from model: {response}");
+                warn!(
+                    "Bad response from model (max retries reached) for line '{}': {}",
+                    line, response
+                );
                 so.reset()?;
                 writeln!(so, "{line}")?;
+                break; // Break from retry loop
             } else {
-                debug!("Retrying bad response from model: {response}");
-                continue;
+                debug!(
+                    "Retrying bad response from model for line '{}' (attempt {}): {}",
+                    line,
+                    retry + 1,
+                    response
+                );
+                continue; // Continue to next retry iteration
             }
-
-            break;
         }
     }
     Ok(())
