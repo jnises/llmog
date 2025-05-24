@@ -53,18 +53,6 @@ struct Cli {
     #[arg(long)]
     analyze: bool,
 
-    /// Hugging Face model repository ID (e.g., "TheBloke/Mistral-7B-Instruct-v0.2-GGUF")
-    #[arg(long)]
-    model_repo_id: String,
-
-    /// Filename of the GGUF model in the repository (e.g., "mistral-7b-instruct-v0.2.Q4_K_M.gguf")
-    #[arg(long)]
-    model_filename: String,
-
-    /// Optional: Filename of the tokenizer.json in the repository (e.g., "tokenizer.json")
-    #[arg(long)]
-    tokenizer_filename: Option<String>,
-
     /// Optional: Log level for GGUF loader (trace, debug, info, warn, error, silence). Default: silence
     #[arg(long, default_value = "silence")]
     gguf_log_level: String,
@@ -125,14 +113,8 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    info!(
-        "Initializing MistralLocalEngine with model repo: {}, file: {}",
-        cli.model_repo_id, cli.model_filename
-    );
+    info!("Initializing MistralLocalEngine with the default pre-configured model.");
     let engine = MistralLocalEngine::new(
-        cli.model_repo_id.clone(),
-        cli.model_filename.clone(),
-        cli.tokenizer_filename.clone(),
         gguf_log_level,
         cli.model_cache_dir.clone(),
         Duration::from_secs(cli.timeout * 3), // Increased timeout for potential model downloads

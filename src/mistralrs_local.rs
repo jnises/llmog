@@ -11,6 +11,10 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::time::timeout as tokio_timeout;
 
+// Constants for hardcoded model parameters
+const MODEL_REPO_ID: &str = "jnises/gemma-3-1b-llmog-GGUF";
+const MODEL_FILENAME: &str = "gemma-3-1b-llmog-GGUF.Q8_0.gguf";
+
 #[derive(Error, Debug)]
 pub enum MistralLocalError {
     #[error("Hugging Face Hub API error: {0}")]
@@ -43,10 +47,6 @@ pub struct MistralLocalEngine {
 
 impl MistralLocalEngine {
     pub async fn new(
-        model_repo_id: String,
-        model_filename: String,
-        tokenizer_filename: Option<String>,
-        // chat_template_filename: Option<String>, // mistral.rs GGUF loader might infer this or use internal
         gguf_log_level: mistralrs::gguf::LogLevel, // e.g. mistralrs::gguf::LogLevel::Silence
         cache_dir: Option<PathBuf>,
         download_timeout: Duration,
@@ -57,23 +57,13 @@ impl MistralLocalEngine {
             HfApi::new().context("Failed to initialize HF API")?
         };
 
-        let repo = HfRepo::new(model_repo_id, HfRepoType::Model);
+        let repo = HfRepo::new(MODEL_REPO_ID.to_string(), HfRepoType::Model);
         let api_repo = api.repo(repo);
 
-        let model_path = tokio_timeout(download_timeout, api_repo.get(&model_filename))
+        let model_path = tokio_timeout(download_timeout, api_repo.get(MODEL_FILENAME))
             .await
             .map_err(|_| MistralLocalError::DownloadTimeout(download_timeout))?
-            .context(format!("Failed to download/locate model file: {}", model_filename))?;
-
-        let mut tokenizer_path: Option<PathBuf> = None;
-        if let Some(t_filename) = tokenizer_filename {
-            tokenizer_path = Some(
-                tokio_timeout(download_timeout, api_repo.get(&t_filename))
-                    .await
-                    .map_err(|_| MistralLocalError::DownloadTimeout(download_timeout))?
-                    .context(format!("Failed to download/locate tokenizer file: {}", t_filename))?,
-            );
-        }
+            .context(format!("Failed to download/locate model file: {}", MODEL_FILENAME))?;
         
         // GgufModelBuilder is part of mistralrs::v0_4_api, ensure it's correctly pathed if used directly
         // For simplicity, assuming direct use here. May need mistralrs::v0_4_api::GgufModelBuilder
@@ -81,7 +71,7 @@ impl MistralLocalEngine {
             /* model_id: */ None, // We are providing paths directly
             /* quantized_model_id: */ None,
             /* quantized_filename: */ vec![model_path.to_string_lossy().into_owned()],
-            /* tokenizer_json: */ tokenizer_path.map(|p| p.to_string_lossy().into_owned()),
+            /* tokenizer_json: */ None, // Using None directly as per instructions
             /* chat_template: */ None, // Let mistral.rs try to infer or use its default for GGUF
         );
 
