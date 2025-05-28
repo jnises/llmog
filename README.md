@@ -6,9 +6,9 @@ An experimental tool that uses large language models to automatically highlight 
 
 The tool processes each log entry through a pre-trained language model, which rates its importance on a scale from 0 to 100. This rating is then used to generate a color-coded output, making it easier to identify critical log entries at a glance.
 
-Very much a prototype. Using a finetuned Gemma 3 1B, which is small, but may still be very slow depending on hardware.
+This is very much a prototype. It uses a finetuned Gemma 3 1B model, which is small but may still be very slow depending on hardware.
 
-If you give it something other than a log-file the model has a tendency to get quite confused.
+The model is served using Hugging Face Hub.
 
 ## Prerequisites
 
@@ -41,8 +41,30 @@ tail -f your.log | llmog
 - `--context=N`: Number of lines to use for context (default: 3)
 - `--timeout=SECONDS`: Request timeout in seconds (default: 10)
 
-Note that you need a terminal with true color ansi support for this to be useful.
+Note that you need a terminal with true color ANSI support for this to be useful.
 
-## TODO
+## Training
 
-- Finetune using non-log files to make sure the model doesn't get confused.
+Notebooks for finetuning the language model are provided in the `training` directory.
+The notebooks are meant to be run on Google Colab.
+
+They need the secrets `HF_TOKEN` and `OPENROUTER_API_KEY`.
+
+In order to upload new data or models to Hugging Face, make sure you have things set up there. Replace `jnises` with your username in the notebooks.
+
+### Synthesizing data
+
+The notebook in [training/synthesize.ipynb](training/synthesize.ipynb) uses the `gemini-2.0-flash` model accessed using [openrouter](https://openrouter.ai/).
+A paid account there is required. Synthesizing all the data should cost $4 or so.
+
+The notebook synthesizes log files and non-log files.
+From those files, conversations are synthesized using a system prompt that mostly matches the one used later during inference.
+
+### Finetuning
+
+Finetuning is done using [training/finetune.ipynb](training/finetune.ipynb).
+The notebook uses [unsloth](https://unsloth.ai/).
+
+### Quantizing
+
+Quantizing the model is done in a separate notebook [training/quantize.ipynb](training/quantize.ipynb).
