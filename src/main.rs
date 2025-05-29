@@ -212,7 +212,6 @@ fn main() -> anyhow::Result<()> {
                         );
                         bail!(e);
                     }
-                    // Handle other errors
                     else {
                         bail!(e);
                     }
