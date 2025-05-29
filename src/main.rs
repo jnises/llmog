@@ -94,17 +94,47 @@ fn main() -> anyhow::Result<()> {
         cli.ollama_url,
         MODEL.to_string(),
         Duration::from_secs(cli.timeout),
-    )?;
-    let model_exists = ol.model_exists()?;
+    )
+    .map_err(|e| {
+        if e.is_connection_error() {
+            anyhow::anyhow!(
+                "Failed to connect to ollama at {}. Is ollama running?: {}",
+                e.url().unwrap_or("unknown"),
+                e
+            )
+        } else {
+            anyhow::anyhow!("Failed to initialize ollama client: {}", e)
+        }
+    })?;
+
+    let model_exists = ol.model_exists().map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to check if model '{}' exists on ollama server at {}: {}",
+            e.model().unwrap_or("unknown"),
+            e.url().unwrap_or("unknown"),
+            e
+        )
+    })?;
+
     if !model_exists {
         info!("Model '{MODEL}' not found locally, pulling...");
     }
     //  we pull even if the model exists in case it has been updated
     if let Err(e) = ol.pull() {
         if model_exists {
-            debug!("Unable to pull model. But it was already downloaded so that's ok: {e}");
+            debug!(
+                "Unable to pull model '{}' from {}: {}. But it was already downloaded so that's ok",
+                e.model().unwrap_or(MODEL),
+                e.url().unwrap_or("unknown"),
+                e
+            );
         } else {
-            bail!("Unable to pull model: {e}");
+            bail!(
+                "Unable to pull model '{}' from {}: {}",
+                e.model().unwrap_or(MODEL),
+                e.url().unwrap_or("unknown"),
+                e
+            );
         }
     }
 
@@ -150,13 +180,14 @@ fn main() -> anyhow::Result<()> {
         for retry in 0.. {
             let response = match ol.chat(&messages) {
                 Ok(r) => r,
-                Err(ollama::Error::Reqwest(e)) => {
-                    // TODO: perhaps use the streaming mode instead to be able to handle the timeout better?
+                Err(e) => {
+                    // Handle timeout errors specifically
                     if e.is_timeout() {
-                        // TODO: share the functionality here with the bad response handling below
                         if retry >= MAX_TIMEOUTS {
                             warn!(
-                                "Too many timeouts communicating with ollama (timeout: {}s)",
+                                "Too many timeouts communicating with ollama at {} for model '{}' (timeout: {}s)",
+                                e.url().unwrap_or("unknown"),
+                                e.model().unwrap_or("unknown"),
                                 cli.timeout
                             );
                             so.reset()?;
@@ -164,17 +195,25 @@ fn main() -> anyhow::Result<()> {
                             break;
                         } else {
                             debug!(
-                                "Timeout communicating with ollama (timeout: {}s)",
+                                "Timeout communicating with ollama at {} for model '{}' (timeout: {}s)",
+                                e.url().unwrap_or("unknown"),
+                                e.model().unwrap_or("unknown"),
                                 cli.timeout
                             );
                             continue;
                         }
+                    }
+                    // Handle connection errors
+                    else if e.is_connection_error() {
+                        warn!(
+                            "Connection error communicating with ollama at {}: {}",
+                            e.url().unwrap_or("unknown"),
+                            e
+                        );
+                        bail!(e);
                     } else {
                         bail!(e);
                     }
-                }
-                Err(e) => {
-                    bail!(e);
                 }
             };
 
