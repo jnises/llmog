@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::bail;
+use anyhow;
 use log::debug;
 use reqwest::{StatusCode, blocking::Client};
 use serde::{Deserialize, Serialize};
@@ -13,14 +13,16 @@ pub struct Ollama {
 }
 
 impl Ollama {
-    pub fn new(ollama_url: String, model: String, timeout: Duration) -> anyhow::Result<Self> {
-        let client = Client::builder().timeout(timeout).build()?;
+    pub fn new(ollama_url: String, model: String, timeout: Duration) -> Result<Self, Error> {
+        let client = Client::builder().timeout(timeout).build()
+            .map_err(|e| Error::Connection { url: ollama_url.clone(), source: e })?;
+        
         if let Err(e) = client
             .get(format!("{}/api/version", ollama_url))
             .send()
             .and_then(|r| r.error_for_status())
         {
-            bail!("Unable to connect to ollama. Is it running?: {e}");
+            return Err(Error::Connection { url: ollama_url, source: e });
         }
 
         Ok(Self {
@@ -30,7 +32,7 @@ impl Ollama {
         })
     }
 
-    pub fn model_exists(&self) -> anyhow::Result<bool> {
+    pub fn model_exists(&self) -> Result<bool, Error> {
         let show_res = self
             .client
             .post(format!("{}/api/show", self.ollama_url))
@@ -49,14 +51,29 @@ impl Ollama {
                 if let Some(StatusCode::NOT_FOUND) = e.status() {
                     false
                 } else {
-                    bail!("Error checking model: {e}")
+                    return Err(Error::ModelCheck { 
+                        model: self.model.clone(), 
+                        url: self.ollama_url.clone(), 
+                        source: e 
+                    });
                 }
             }
         };
         Ok(model_exists)
     }
 
-    pub fn pull(&self) -> anyhow::Result<()> {
+    /// Ensures the model exists, pulling it if necessary
+    pub fn ensure_model(&self) -> Result<(), Error> {
+        if !self.model_exists()? {
+            return Err(Error::ModelNotFound {
+                model: self.model.clone(),
+                url: self.ollama_url.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn pull(&self) -> Result<(), Error> {
         self.client
             .post(format!("{}/api/pull", self.ollama_url))
             // Two minutes should be enough for everyone..
@@ -67,7 +84,12 @@ impl Ollama {
                 stream: false,
             })
             .send()
-            .and_then(|r| r.error_for_status())?;
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| Error::ModelPull { 
+                model: self.model.clone(), 
+                url: self.ollama_url.clone(), 
+                source: e 
+            })?;
         Ok(())
     }
 
@@ -81,10 +103,20 @@ impl Ollama {
                 messages,
                 format: None,
             })
-            .send()?
-            .json()?;
+            .send()
+            .map_err(|e| Error::ChatRequest { 
+                model: self.model.clone(), 
+                url: self.ollama_url.clone(), 
+                source: e 
+            })?
+            .json()
+            .map_err(|e| Error::ChatRequest { 
+                model: self.model.clone(), 
+                url: self.ollama_url.clone(), 
+                source: e 
+            })?;
         if &response.message.role != "assistant" {
-            return Err(Error::Role(response.message.role.clone()));
+            return Err(Error::Role { role: response.message.role.clone() });
         }
         Ok(response.message.content)
     }
@@ -95,8 +127,92 @@ pub enum Error {
     #[error("HTTP error: {0}")]
     Reqwest(#[from] reqwest::Error),
 
-    #[error("Invalid role: {0}")]
-    Role(String),
+    #[error("Invalid role: expected 'assistant', got '{role}'")]
+    Role { role: String },
+
+    #[error("Failed to connect to ollama at {url}: {source}")]
+    Connection { url: String, source: reqwest::Error },
+
+    #[error("Model '{model}' not found on ollama server at {url}")]
+    ModelNotFound { 
+        model: String, 
+        url: String,
+    },
+
+    #[error("Failed to pull model '{model}' from ollama server at {url}: {source}")]
+    ModelPull { 
+        model: String, 
+        url: String, 
+        source: reqwest::Error 
+    },
+
+    #[error("Chat request failed for model '{model}' on ollama server at {url}: {source}")]
+    ChatRequest { 
+        model: String, 
+        url: String, 
+        source: reqwest::Error 
+    },
+
+    #[error("Failed to check if model '{model}' exists on ollama server at {url}: {source}")]
+    ModelCheck { 
+        model: String, 
+        url: String, 
+        source: reqwest::Error 
+    },
+}
+
+impl Error {
+    /// Returns true if this error is a timeout error
+    pub fn is_timeout(&self) -> bool {
+        match self {
+            Error::Reqwest(e) | 
+            Error::Connection { source: e, .. } |
+            Error::ModelCheck { source: e, .. } |
+            Error::ModelPull { source: e, .. } |
+            Error::ChatRequest { source: e, .. } => e.is_timeout(),
+            _ => false,
+        }
+    }
+
+    /// Returns true if this error is a connection-related error
+    pub fn is_connection_error(&self) -> bool {
+        match self {
+            Error::Connection { .. } => true,
+            Error::Reqwest(e) |
+            Error::ModelCheck { source: e, .. } |
+            Error::ModelPull { source: e, .. } |
+            Error::ChatRequest { source: e, .. } => e.is_connect(),
+            _ => false,
+        }
+    }
+
+    /// Returns the model name if this error is model-related
+    pub fn model(&self) -> Option<&str> {
+        match self {
+            Error::ModelNotFound { model, .. } |
+            Error::ModelPull { model, .. } |
+            Error::ChatRequest { model, .. } |
+            Error::ModelCheck { model, .. } => Some(model),
+            _ => None,
+        }
+    }
+
+    /// Returns the ollama URL if available
+    pub fn url(&self) -> Option<&str> {
+        match self {
+            Error::Connection { url, .. } |
+            Error::ModelNotFound { url, .. } |
+            Error::ModelPull { url, .. } |
+            Error::ChatRequest { url, .. } |
+            Error::ModelCheck { url, .. } => Some(url),
+            _ => None,
+        }
+    }
+
+    /// Converts this error to an anyhow error with additional context
+    pub fn to_anyhow_with_context(self, context: &str) -> anyhow::Error {
+        anyhow::anyhow!("{}: {}", context, self)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
