@@ -106,7 +106,7 @@ impl Ollama {
                 source: e,
             })?
             .json()
-            .map_err(|e| Error::ChatRequest {
+            .map_err(|e| Error::ChatRequestJsonFormat {
                 model: self.model.clone(),
                 url: self.ollama_url.clone(),
                 source: e,
@@ -142,6 +142,15 @@ pub enum Error {
         source: reqwest::Error,
     },
 
+    #[error(
+        "Chat reply has the wrong format for model '{model}' on ollama server at {url}: {source}"
+    )]
+    ChatRequestJsonFormat {
+        model: String,
+        url: String,
+        source: reqwest::Error,
+    },
+
     #[error("Failed to check if model '{model}' exists on ollama server at {url}: {source}")]
     ModelCheck {
         model: String,
@@ -157,8 +166,9 @@ impl Error {
             Error::Connection { source: e, .. }
             | Error::ModelCheck { source: e, .. }
             | Error::ModelPull { source: e, .. }
-            | Error::ChatRequest { source: e, .. } => e.is_timeout(),
-            _ => false,
+            | Error::ChatRequest { source: e, .. }
+            | Error::ChatRequestJsonFormat { source: e, .. } => e.is_timeout(),
+            Error::Role { .. } => false,
         }
     }
 
@@ -168,8 +178,9 @@ impl Error {
             Error::Connection { .. } => true,
             Error::ModelCheck { source: e, .. }
             | Error::ModelPull { source: e, .. }
-            | Error::ChatRequest { source: e, .. } => e.is_connect(),
-            _ => false,
+            | Error::ChatRequest { source: e, .. }
+            | Error::ChatRequestJsonFormat { source: e, .. } => e.is_connect(),
+            Error::Role { .. } => false,
         }
     }
 
@@ -178,6 +189,7 @@ impl Error {
         match self {
             Error::ModelPull { model, .. }
             | Error::ChatRequest { model, .. }
+            | Error::ChatRequestJsonFormat { model, .. }
             | Error::ModelCheck { model, .. } => Some(model),
             _ => None,
         }
