@@ -211,8 +211,7 @@ fn main() -> anyhow::Result<()> {
                             e
                         );
                         bail!(e);
-                    }
-                    else {
+                    } else {
                         bail!(e);
                     }
                 }
