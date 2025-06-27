@@ -229,10 +229,7 @@ fn main() -> anyhow::Result<()> {
                 if reason_lines.len() > 1 && retry == 0 {
                     // If this is the first attempt and we got a multi-line reason, retry
                     // if it keeps giving us multiple lines, just pick the last one to avoid too many retries
-                    debug!(
-                        "First attempt returned multi-line reason, retrying: {}",
-                        response
-                    );
+                    debug!("First attempt returned multi-line reason, retrying: {response}");
                     continue;
                 }
                 reason = reason_lines.last().unwrap_or(&"").trim().to_string();

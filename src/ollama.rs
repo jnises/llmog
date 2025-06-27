@@ -22,7 +22,7 @@ impl Ollama {
             })?;
 
         if let Err(e) = client
-            .get(format!("{}/api/version", ollama_url))
+            .get(format!("{ollama_url}/api/version"))
             .send()
             .and_then(|r| r.error_for_status())
         {
